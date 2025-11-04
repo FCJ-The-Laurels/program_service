@@ -8,13 +8,14 @@ import java.util.UUID;
 @Getter @Setter @NoArgsConstructor @AllArgsConstructor @Builder
 @Entity @Table(name = "programs", schema = "program")
 public class Program {
-    @Id @GeneratedValue private UUID id;
+    @Id @GeneratedValue
+    private UUID id;
 
     @Column(nullable=false) private UUID userId;
     private UUID coachId;
     private UUID chatroomId;
 
-    @Column(nullable=false) private int planDays;           // 30|45|60
+    @Column(nullable=false) private int planDays; // 30|45|60
     @Enumerated(EnumType.STRING) @Column(nullable=false)
     private ProgramStatus status = ProgramStatus.ACTIVE;
 
@@ -33,10 +34,23 @@ public class Program {
     @Column(nullable=false) private Instant updatedAt;
     private Instant deletedAt;
 
-    @PrePersist void preInsert(){
+    @PrePersist void preInsert() {
         Instant now = Instant.now();
         createdAt = now; updatedAt = now;
         if (startDate == null) startDate = LocalDate.now(ZoneOffset.UTC);
     }
     @PreUpdate void preUpdate(){ updatedAt = Instant.now(); }
+
+    @Column(name = "streak_current", nullable = false)
+    private int streakCurrent = 0;
+
+    @Column(name = "streak_best", nullable = false)
+    private int streakBest = 0;
+
+    @Column(name = "last_smoke_at") // optional: columnDefinition = "timestamptz"
+    private OffsetDateTime lastSmokeAt;
+
+    // Thêm nếu DB có cột này
+    @Column(name = "streak_frozen_until")
+    private OffsetDateTime streakFrozenUntil;
 }

@@ -1,5 +1,6 @@
 package com.smokefree.program.domain.service.quiz.impl.quiz;
 
+import com.smokefree.program.domain.model.AssignmentScope;
 import com.smokefree.program.domain.model.QuizAssignment;
 import com.smokefree.program.domain.repo.ProgramRepository;
 import com.smokefree.program.domain.repo.QuizAssignmentRepository;
@@ -20,14 +21,23 @@ public class QuizAssignmentServiceImpl implements QuizAssignmentService {
     private final ProgramRepository programRepo;
 
     @Override
-    public void assignToPrograms(UUID templateId, List<UUID> programIds, int everyDays, UUID actorId, String scope) {
+    public void assignToPrograms(UUID templateId,
+                                 List<UUID> programIds,
+                                 int everyDays,
+                                 UUID actorId,
+                                 String scope) {
         if (programIds == null || programIds.isEmpty()) return;
+
+        // 1) "coach" đang được dùng như QUYỀN tác giả -> tách riêng
+        boolean coachMode = scope != null && "coach".equalsIgnoreCase(scope);
+
+        // 2) scope gán xuống DB phải là ENUM; nếu không parse được thì mặc định DAY
+        AssignmentScope assignmentScope = safeParseAssignmentScope(scope);
 
         List<QuizAssignment> batch = new ArrayList<>();
         for (UUID pid : programIds) {
             // quyền coach: xác minh coach là chủ program
-            if ("coach".equals(scope)) {
-                // cần method repo này (ở dưới mục Repository Methods)
+            if (coachMode) {
                 if (!programRepo.existsByIdAndCoachId(pid, actorId)) continue;
             }
             // tránh trùng assignment
@@ -39,11 +49,24 @@ public class QuizAssignmentServiceImpl implements QuizAssignmentService {
             a.setProgramId(pid);
             a.setEveryDays(everyDays);
             a.setCreatedAt(Instant.now());
-            a.setCreatedBy(actorId); // nếu entity không có createdBy, bỏ
-            a.setScope(scope);       // nếu entity không có scope, bỏ
+            a.setCreatedBy(actorId);
+
+            // ✅ gán ENUM thay vì String
+            a.setScope(assignmentScope);
+
             batch.add(a);
         }
         assignmentRepo.saveAll(batch);
+    }
+
+    private AssignmentScope safeParseAssignmentScope(String s) {
+        if (s == null) return AssignmentScope.DAY;
+        try {
+            return AssignmentScope.valueOf(s.trim().toUpperCase()); // DAY/WEEK/PROGRAM/CUSTOM
+        } catch (IllegalArgumentException ex) {
+            // nếu người gọi truyền "coach" hoặc rác -> fallback
+            return AssignmentScope.DAY;
+        }
     }
 
     @Override
