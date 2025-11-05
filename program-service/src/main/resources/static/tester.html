@@ -1,0 +1,222 @@
+<!doctype html>
+<html lang="vi">
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>SmokeFree – Test Frontend</title>
+    <style>
+        :root{
+            --bg:#0f172a;--panel:#111827;--muted:#374151;--card:#0b1220;--accent:#22c55e;--text:#e5e7eb;--sub:#9ca3af;--danger:#ef4444;
+            --radius:14px
+        }
+        *{box-sizing:border-box} html,body{height:100%}
+        body{margin:0;background:linear-gradient(180deg,#0b1220,#0a0f1a 60%);font:14px/1.5 system-ui,Segoe UI,Roboto,Helvetica,Arial;color:var(--text)}
+        .wrap{max-width:1100px;margin:32px auto;padding:0 16px}
+        h1{font-size:22px;margin:0 0 14px}
+        .grid{display:grid;grid-template-columns: 1.2fr .8fr;gap:18px}
+        .card{background:rgba(17,24,39,.6);border:1px solid #1f2937;border-radius:var(--radius);box-shadow:0 6px 28px rgba(0,0,0,.35)}
+        .card .hd{padding:14px 16px;border-bottom:1px solid #1f2937;color:#cbd5e1;display:flex;align-items:center;gap:10px}
+        .card .bd{padding:14px 16px}
+        label{display:block;margin:8px 0 6px;color:#cbd5e1}
+        input,select,textarea{width:100%;background:#0b1220;border:1px solid #253046;color:#d1d5db;border-radius:12px;padding:10px 12px}
+        textarea{min-height:160px;font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
+        .row{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+        .actions{display:flex;flex-wrap:wrap;gap:10px;margin-top:12px}
+        button{border:0;border-radius:12px;padding:10px 14px;font-weight:600;cursor:pointer}
+        .primary{background:linear-gradient(180deg,#22c55e,#16a34a);color:#052e16}
+        .secondary{background:#0b1220;border:1px solid #253046;color:#d1d5db}
+        .danger{background:linear-gradient(180deg,#ef4444,#b91c1c);color:white}
+        .muted{color:var(--sub)}
+        pre{white-space:pre-wrap;word-break:break-word;background:#050a14;padding:12px;border-radius:12px;border:1px solid #1f2937}
+        kbd{background:#111827;border:1px solid #1f2937;border-bottom-color:#0b1220;border-radius:6px;padding:2px 6px;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;color:#cbd5e1}
+        .pill{display:inline-flex;align-items:center;gap:6px;padding:6px 10px;border-radius:999px;background:#0b1220;border:1px solid #223048;color:#cbd5e1}
+        .status{display:flex;gap:10px;flex-wrap:wrap;margin:10px 0}
+        .mono{font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
+    </style>
+</head>
+<body>
+<div class="wrap">
+    <h1>🧪 SmokeFree – Minimal Test Frontend</h1>
+    <p class="muted">Lưu file này vào <code class="mono">src/main/resources/static/tester.html</code> và chạy ứng dụng. Mở <code class="mono">http://localhost:8080/tester.html</code>.</p>
+
+    <div class="grid">
+        <!-- Left: Generic REST client -->
+        <div class="card">
+            <div class="hd">⚙️ REST client</div>
+            <div class="bd">
+                <div class="row">
+                    <div>
+                        <label>Base URL</label>
+                        <input id="baseUrl" placeholder="http://localhost:8080" />
+                    </div>
+                    <div>
+                        <label>Program ID (UUID)</label>
+                        <input id="programId" placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx" />
+                    </div>
+                </div>
+
+                <div class="row">
+                    <div>
+                        <label>HTTP Method</label>
+                        <select id="method">
+                            <option>GET</option>
+                            <option selected>POST</option>
+                            <option>PUT</option>
+                            <option>DELETE</option>
+                            <option>PATCH</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label>Path</label>
+                        <input id="path" placeholder="/api/programs/{programId}/smoke-events" />
+                    </div>
+                </div>
+
+                <label>Request body (JSON)</label>
+                <textarea id="body" spellcheck="false"></textarea>
+
+                <div class="actions">
+                    <button class="secondary" onclick="prefillSmokeEvent()">↩️ Prefill: Create SmokeEvent</button>
+                    <button class="primary" onclick="send()">🚀 Send</button>
+                    <button class="danger" onclick="clearOutput()">🧹 Clear</button>
+                </div>
+
+                <div class="status" id="status"></div>
+
+                <label>Response</label>
+                <pre id="out">(chưa gửi)</pre>
+            </div>
+        </div>
+
+        <!-- Right: Quick actions -->
+        <div class="card">
+            <div class="hd">⚡ Quick actions</div>
+            <div class="bd">
+                <p class="muted">Các nút dưới đây sẽ tự set đường dẫn & body.
+                    Bạn có thể sửa lại trước khi nhấn <kbd>Send</kbd>.</p>
+
+                <label>Sự kiện hút thuốc (SmokeEvent)</label>
+                <div class="row">
+                    <div>
+                        <label>eventType</label>
+                        <input id="qa_eventType" value="SMOKE" />
+                    </div>
+                    <div>
+                        <label>eventAt (ISO)</label>
+                        <input id="qa_eventAt" />
+                    </div>
+                </div>
+                <label>note</label>
+                <input id="qa_note" placeholder="Ghi chú..." />
+                <div class="actions">
+                    <button class="primary" onclick="quickCreateSmokeEvent()">📝 Create SmokeEvent (Quick)</button>
+                    <button class="secondary" onclick="nowIso()">⏱️ Now (ISO)</button>
+                </div>
+
+                <hr style="border:0;border-top:1px solid #1f2937;margin:18px 0">
+
+                <p class="muted">Tip: copy lệnh <kbd>curl</kbd> bên dưới để test nhanh trong terminal.</p>
+                <pre id="curl">( sẽ tạo khi bạn bấm Prefill/Quick )</pre>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+    const $ = (id)=>document.getElementById(id);
+    const LS = {
+        get(k, def){ try{ return localStorage.getItem(k) ?? def }catch{ return def }},
+        set(k, v){ try{ localStorage.setItem(k, v) }catch{} }
+    };
+
+    function init(){
+        $("baseUrl").value = LS.get('sf.baseUrl','http://localhost:8080');
+        $("programId").value = LS.get('sf.programId','');
+        nowIso();
+        prefillSmokeEvent();
+    }
+
+    function nowIso(){
+        $("qa_eventAt").value = new Date().toISOString();
+    }
+
+    function prefillSmokeEvent(){
+        const pid = $("programId").value || "{programId}";
+        $("method").value = 'POST';
+        $("path").value = `/api/programs/${pid}/smoke-events`;
+        const body = {
+            eventType: $("qa_eventType").value || "SMOKE",
+            eventAt: $("qa_eventAt").value || new Date().toISOString(),
+            note: $("qa_note").value || ""
+        };
+        $("body").value = JSON.stringify(body, null, 2);
+        renderCurl();
+    }
+
+    function quickCreateSmokeEvent(){
+        prefillSmokeEvent();
+        send();
+    }
+
+    async function send(){
+        const baseUrl = $("baseUrl").value.trim() || 'http://localhost:8080';
+        const method = $("method").value;
+        let path = $("path").value.trim();
+
+        LS.set('sf.baseUrl', baseUrl);
+        const pid = $("programId").value.trim();
+        if(pid){ LS.set('sf.programId', pid); path = path.replace('{programId}', pid);}
+
+        const url = baseUrl.replace(/\/$/,'') + path;
+        let body = $("body").value.trim();
+        const headers = { 'Accept': 'application/json' };
+        if(method !== 'GET' && method !== 'DELETE') headers['Content-Type'] = 'application/json';
+
+        let payload = undefined;
+        if(body && (method !== 'GET' && method !== 'DELETE')) payload = body;
+
+        const t0 = performance.now();
+        let statusHtml = '';
+        try{
+            const res = await fetch(url, { method, headers, body: payload });
+            const t1 = performance.now();
+            const timeMs = (t1 - t0).toFixed(0);
+            const ct = res.headers.get('content-type') || '';
+            let dataText = await res.text();
+            try{ if(ct.includes('application/json')) dataText = JSON.stringify(JSON.parse(dataText), null, 2) }catch{}
+            $("out").textContent = dataText || '(no content)';
+            statusHtml = `<span class="pill">${method}</span> <span class="pill mono">${res.status} ${res.statusText}</span> <span class="pill">${timeMs} ms</span> <span class="pill mono">${url}</span>`;
+        }catch(err){
+            $("out").textContent = 'ERROR: ' + err.message;
+            statusHtml = `<span class="pill" style="background:#190b0b;border-color:#3b1111;color:#fecaca">Failed</span> <span class="pill mono">${method}</span> <span class="pill mono">${url}</span>`;
+        }
+        $("status").innerHTML = statusHtml;
+        renderCurl();
+    }
+
+    function clearOutput(){
+        $("out").textContent = '';
+        $("status").innerHTML = '';
+    }
+
+    function renderCurl(){
+        const baseUrl = $("baseUrl").value.trim() || 'http://localhost:8080';
+        const method = $("method").value;
+        let path = $("path").value.trim();
+        const pid = $("programId").value.trim();
+        if(pid) path = path.replace('{programId}', pid);
+        const url = baseUrl.replace(/\/$/,'') + path;
+
+        let body = $("body").value.trim();
+        let curl = `curl -i -X ${method} \\`;
+        curl += `\n  -H "Accept: application/json" \\\n`;
+        if(method !== 'GET' && method !== 'DELETE') curl += `  -H "Content-Type: application/json" \\\n`;
+        if(body && (method !== 'GET' && method !== 'DELETE')) curl += `  --data '${body.replace(/'/g, "'\\''")}' \\\n`;
+        curl += `  '${url}'`;
+        $("curl").textContent = curl;
+    }
+
+    init();
+</script>
+</body>
+</html>
