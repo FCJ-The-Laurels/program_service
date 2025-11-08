@@ -1,7 +1,5 @@
-package com.smokefree.program.domain.service.smoke;
+package com.smokefree.program.domain.service;
 
-import com.smokefree.program.domain.model.Program;
-import com.smokefree.program.domain.model.SmokeEvent;
 import com.smokefree.program.web.dto.streak.StreakBreakRes;
 import com.smokefree.program.web.dto.streak.StreakView;
 

@@ -1,15 +1,18 @@
 package com.smokefree.program.domain.service.smoke.impl;
 import com.smokefree.program.domain.model.SmokeEvent;
+import com.smokefree.program.domain.model.SmokeEventKind;
 import com.smokefree.program.domain.model.SmokeEventType;
 import com.smokefree.program.domain.repo.SmokeEventRepository;
 
 import com.smokefree.program.domain.service.smoke.SmokeEventService;
 import com.smokefree.program.domain.service.smoke.StreakService;
+import com.smokefree.program.util.SecurityUtil;
 import com.smokefree.program.web.dto.smoke.CreateSmokeEventReq;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.time.Instant;
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
 import java.util.UUID;
@@ -21,26 +24,28 @@ public class SmokeEventServiceImpl implements SmokeEventService {
     private final SmokeEventRepository smokeRepo;
     private final StreakService streakService;
 
-    @Override
     @Transactional
     public SmokeEvent create(UUID programId, CreateSmokeEventReq req) {
-        UUID current = com.smokefree.program.util.SecurityUtil.currentUserId();
-        if (current == null) {
-            throw new IllegalStateException("Missing authenticated user");
-        }
+        UUID current = SecurityUtil.currentUserId();
+        var when = req.eventAt() != null ? req.eventAt() : OffsetDateTime.now(ZoneOffset.UTC);
+
         SmokeEvent e = new SmokeEvent();
         e.setId(UUID.randomUUID());
         e.setProgramId(programId);
-        e.setEventType(req.eventType());
         e.setUserId(current);
-        e.setEventAt(req.eventAt() != null ? req.eventAt() : OffsetDateTime.now(ZoneOffset.UTC));
+        e.setEventType(req.eventType());
+        e.setKind(req.kind() != null ? req.kind()
+                : (req.eventType() == SmokeEventType.SMOKE ? SmokeEventKind.SLIP : null));
+        e.setEventAt(when);
+        e.setOccurredAt(when);
         e.setNote(req.note());
-        smokeRepo.save(e);
+        e.setCreatedAt(Instant.now());      // <- tự set
 
-        if (e.getEventType() == SmokeEventType.SMOKE) {
-            streakService.breakStreak(programId, e.getEventAt(), e.getId(), e.getNote());
+        SmokeEvent saved = smokeRepo.saveAndFlush(e); // hoặc save(e)
+        if (saved.getEventType() == SmokeEventType.SMOKE) {
+            streakService.breakStreak(programId, when, saved.getId(), saved.getNote());
         }
-        return e;
+        return saved;
     }
 }
 

@@ -19,7 +19,10 @@ public class QuizAssignment {
     @JdbcTypeCode(SqlTypes.NAMED_ENUM)
     @Column(name = "scope", nullable = false, columnDefinition = "program.assignment_scope")
     private AssignmentScope scope = AssignmentScope.DAY;
-
+    @Enumerated(EnumType.STRING)
+    @JdbcTypeCode(SqlTypes.NAMED_ENUM)
+    @Column(name="origin", columnDefinition="program.quiz_assignment_origin", nullable=false)
+    private QuizAssignmentOrigin origin;
     @Column(name = "expires_at")
     private OffsetDateTime expiresAt;
     @Column(name="template_id") private UUID templateId;

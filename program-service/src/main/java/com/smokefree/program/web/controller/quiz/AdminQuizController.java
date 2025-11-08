@@ -23,29 +23,33 @@ public class AdminQuizController {
     @PostMapping("/templates")
     @PreAuthorize("hasRole('ADMIN')")
     public TemplateRes createSystem(@RequestBody @Valid TemplateUpsertReq req) {
-        var t = templateService.createSystemTemplate(req, getUserId());
+        UUID userId = getUserId(); // bắt buộc có user
+        var t = templateService.createSystemTemplate(req, userId);
         return new TemplateRes(t.getId(), t.getName(), t.getVersion(), t.getStatus().name());
     }
 
     @PatchMapping("/templates/{id}/publish")
     @PreAuthorize("hasRole('ADMIN')")
     public TemplateRes publish(@PathVariable UUID id) {
-        var t = templateService.publish(id, getUserId());
+        UUID userId = getUserId();
+        var t = templateService.publish(id, userId);
         return new TemplateRes(t.getId(), t.getName(), t.getVersion(), t.getStatus().name());
     }
 
     @PostMapping("/assignments")
     @PreAuthorize("hasRole('ADMIN')")
     public void assign(@RequestBody @Valid AssignmentReq req) {
+        UUID userId = getUserId();
         assignmentService.assignToPrograms(
                 req.templateId(),
                 req.programIds(),
                 req.everyDays() == null ? 5 : req.everyDays(),
-                getUserId(),
+                userId,
                 "system"
         );
     }
 
-    private UUID getUserId() { return com.smokefree.program.util.SecurityUtil.currentUserId(); }
+    private UUID getUserId() {
+        return com.smokefree.program.util.SecurityUtil.requireUserId();
+    }
 }
-

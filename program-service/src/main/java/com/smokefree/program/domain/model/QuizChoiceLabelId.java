@@ -1,26 +1,24 @@
 package com.smokefree.program.domain.model;
 
-import jakarta.persistence.*;
-import lombok.EqualsAndHashCode;
-import lombok.Getter;
-import lombok.Setter;
+import jakarta.persistence.Column;
+import jakarta.persistence.Embeddable;
+import lombok.*;
 
 import java.io.Serializable;
 import java.util.UUID;
 
 @Embeddable
-@Getter @Setter @EqualsAndHashCode
+@Getter @Setter
+@NoArgsConstructor
+@AllArgsConstructor
+@EqualsAndHashCode
 public class QuizChoiceLabelId implements Serializable {
+    @Column(name = "template_id", nullable = false)
+    private UUID templateId;
 
-    // Khóa câu hỏi (template_id + question_no)
-    @Embedded
-    @AttributeOverrides({
-            @AttributeOverride(name = "templateId", column = @Column(name = "template_id")),
-            @AttributeOverride(name = "questionNo", column = @Column(name = "question_no"))
-    })
-    private QuizTemplateQuestionId questionId;
+    @Column(name = "question_no", nullable = false)
+    private Integer questionNo;
 
-    @Column(name = "score")
-    private Integer score;
+    @Column(name = "label_code", length = 8, nullable = false)
+    private String labelCode; // A, B, C... hoặc bất kỳ mã nào bạn dùng
 }
-

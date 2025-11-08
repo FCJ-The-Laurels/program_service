@@ -1,13 +1,20 @@
 package com.smokefree.program.auth;
 
-import jakarta.servlet.*;
-import jakarta.servlet.http.*;
+import jakarta.servlet.FilterChain;
+import jakarta.servlet.ServletException;
+import jakarta.servlet.http.HttpServletRequest;
+import jakarta.servlet.http.HttpServletResponse;
 import org.springframework.core.env.Environment;
+import org.springframework.lang.NonNull;
+import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
+import org.springframework.security.core.authority.SimpleGrantedAuthority;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.web.filter.OncePerRequestFilter;
 
 import java.io.IOException;
 import java.util.Arrays;
+import java.util.List;
+import java.util.UUID;
 
 public class HeaderUserContextFilter extends OncePerRequestFilter {
 
@@ -18,48 +25,58 @@ public class HeaderUserContextFilter extends OncePerRequestFilter {
     }
 
     @Override
-    protected void doFilterInternal(HttpServletRequest req, HttpServletResponse res, FilterChain chain)
-            throws ServletException, IOException {
+    protected void doFilterInternal(
+            @NonNull HttpServletRequest req,
+            @NonNull HttpServletResponse res,
+            @NonNull FilterChain chain) throws ServletException, IOException {
 
-        // Log nhận thông tin từ header
-        String uid = req.getHeader("X-User-Id");
+        String uid  = req.getHeader("X-User-Id");
         String role = req.getHeader("X-User-Role");
 
-        // Log toàn bộ các thông tin header để kiểm tra
-        System.out.println("Received headers - X-User-Id: " + uid + ", X-User-Role: " + role);
-
-        // Kiểm tra nếu đã có auth (do filter khác set) thì bỏ qua
+        // Nếu đã có Authentication thì bỏ qua
         if (SecurityContextHolder.getContext().getAuthentication() != null) {
-            System.out.println("Authentication already set, skipping HeaderUserContextFilter.");
             chain.doFilter(req, res);
             return;
         }
 
-        // Kiểm tra môi trường, xem có phải dev hay không
         boolean isDev = Arrays.asList(env.getActiveProfiles()).contains("dev");
-        System.out.println("Is dev profile: " + isDev);
 
-        // Kiểm tra nếu thiếu header, return lỗi nếu không phải môi trường dev
-        if (uid == null || role == null || uid.isBlank() || role.isBlank()) {
-            if (isDev) {
-                System.out.println("Dev environment: Passing request to next filter.");
+        // Thiếu header
+        if (uid == null || uid.isBlank() || role == null || role.isBlank()) {
+            if (isDev) { // dev thì cho qua
                 chain.doFilter(req, res);
                 return;
             }
-
-            // Log lỗi thiếu thông tin
-            System.out.println("Unauthorized: Missing or invalid X-User-Id / X-User-Role");
-
             res.setStatus(HttpServletResponse.SC_UNAUTHORIZED);
             res.setContentType("application/json");
-            res.getWriter().write("""
-                {"error":"unauthorized","message":"Missing or invalid X-User-Id / X-User-Role"}
-                """);
+            res.getWriter().write(
+                    "{\"error\":\"unauthorized\",\"message\":\"Missing or invalid X-User-Id / X-User-Role\"}"
+            );
             return;
         }
 
-        // Log việc tiếp tục với request nếu header hợp lệ
-        System.out.println("Valid headers received. Passing request to next filter.");
+        // Có header → validate & set Authentication
+        try {
+            UUID userId = UUID.fromString(uid.trim());
+            var auth = new UsernamePasswordAuthenticationToken(
+                    userId.toString(),
+                    "N/A",
+                    List.of(new SimpleGrantedAuthority("ROLE_" + role.trim().toUpperCase()))
+            );
+            SecurityContextHolder.getContext().setAuthentication(auth);
+        } catch (IllegalArgumentException ex) {
+            if (isDev) { // dev thì cho qua
+                chain.doFilter(req, res);
+                return;
+            }
+            res.setStatus(HttpServletResponse.SC_UNAUTHORIZED);
+            res.setContentType("application/json");
+            res.getWriter().write(
+                    "{\"error\":\"unauthorized\",\"message\":\"X-User-Id must be a valid UUID\"}"
+            );
+            return;
+        }
+
         chain.doFilter(req, res);
     }
 }

@@ -23,29 +23,34 @@ public class CoachQuizController {
     @PostMapping("/templates")
     @PreAuthorize("hasRole('COACH')")
     public TemplateRes createCoach(@RequestBody @Valid TemplateUpsertReq req) {
-        var t = templateService.createCoachTemplate(req, getUserId());
+        UUID userId = getUserId();
+        var t = templateService.createCoachTemplate(req, userId);
         return new TemplateRes(t.getId(), t.getName(), t.getVersion(), t.getStatus().name());
     }
 
+    // Gợi ý path: "/templates/{id}/clone"
     @PostMapping("/templates/{id}:clone")
     @PreAuthorize("hasRole('COACH')")
     public TemplateRes cloneFromGlobal(@PathVariable UUID id) {
-        var t = templateService.cloneFromGlobal(id, getUserId());
+        UUID userId = getUserId();
+        var t = templateService.cloneFromGlobal(id, userId);
         return new TemplateRes(t.getId(), t.getName(), t.getVersion(), t.getStatus().name());
     }
 
     @PostMapping("/assignments")
     @PreAuthorize("hasRole('COACH')")
     public void assignForOwnPrograms(@RequestBody @Valid AssignmentReq req) {
+        UUID userId = getUserId();
         assignmentService.assignToPrograms(
                 req.templateId(),
                 req.programIds(),
                 req.everyDays() == null ? 5 : req.everyDays(),
-                getUserId(),
+                userId,
                 "coach"
         );
     }
 
-    private UUID getUserId() { return com.smokefree.program.util.SecurityUtil.currentUserId(); }
+    private UUID getUserId() {
+        return com.smokefree.program.util.SecurityUtil.requireUserId();
+    }
 }
-
