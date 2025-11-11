@@ -25,7 +25,6 @@ public class AdminQuizServiceImpl implements AdminQuizService {
     @Override
     public QuizTemplate createTemplate(String name) {
         QuizTemplate t = new QuizTemplate();
-        t.setId(UUID.randomUUID());
         t.setName(name);
         t.setVersion(1);
         t.setStatus(QuizTemplateStatus.DRAFT);

@@ -13,6 +13,7 @@ public class Program {
 
     @Column(nullable=false) private UUID userId;
     private UUID coachId;
+
     private UUID chatroomId;
 
     @Column(nullable=false) private int planDays; // 30|45|60
