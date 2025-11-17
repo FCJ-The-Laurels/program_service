@@ -47,7 +47,8 @@ public class Program {
     @Column(name = "streak_best", nullable = false)
     private int streakBest = 0;
 
-    @Column(name = "last_smoke_at") // optional: columnDefinition = "timestamptz"
+    @Column(name = "last_smoke_at")
+    // optional: columnDefinition = "timestamptz"
     private OffsetDateTime lastSmokeAt;
 
     // Thêm nếu DB có cột này
