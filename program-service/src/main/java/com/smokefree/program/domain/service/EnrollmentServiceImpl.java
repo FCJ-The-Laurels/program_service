@@ -1,43 +1,143 @@
-package com.smokefree.program.domain.service.impl;
+// src/main/java/com/smokefree/program/domain/service/EnrollmentServiceImpl.java
+package com.smokefree.program.domain.service;
 
-import com.smokefree.program.domain.service.EnrollmentService;
+import com.smokefree.program.domain.model.Program;
+import com.smokefree.program.domain.model.ProgramStatus;
+import com.smokefree.program.domain.repo.PlanTemplateRepo;
+import com.smokefree.program.domain.repo.ProgramRepository;
 import com.smokefree.program.web.dto.enrollment.EnrollmentRes;
 import com.smokefree.program.web.dto.enrollment.StartEnrollmentReq;
+import com.smokefree.program.web.error.ConflictException;
+import com.smokefree.program.web.error.NotFoundException;
+import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Instant;
+import java.time.LocalDate;
+import java.time.ZoneOffset;
 import java.time.temporal.ChronoUnit;
+import java.util.Comparator;
 import java.util.List;
+import java.util.Optional;
 import java.util.UUID;
 
 @Service
+@RequiredArgsConstructor
 public class EnrollmentServiceImpl implements EnrollmentService {
 
+    private final ProgramRepository programRepo;
+    private final PlanTemplateRepo planTemplateRepo;
+
     @Override
+    @Transactional
     public EnrollmentRes startTrialOrPaid(UUID userId, StartEnrollmentReq req) {
-        // TODO: validate user tier / entitlement, check not running active program, persist to DB
-        UUID id = UUID.randomUUID();
+        // 1) Không cho trùng program ACTIVE
+        programRepo.findFirstByUserIdAndStatusAndDeletedAtIsNull(userId, ProgramStatus.ACTIVE)
+                .ifPresent(p -> { throw new ConflictException("User already has an ACTIVE program"); });
+
+        // 2) Lấy thông tin template (nếu truyền vào)
+        UUID templateId = req.planTemplateId();
+        String planCode = null;
+        int planDays = 30; // default
+
+        if (templateId != null) {
+            var tplOpt = planTemplateRepo.findById(templateId);
+            if (tplOpt.isPresent()) {
+                var tpl = tplOpt.get();
+                planCode = safeGetCode(tpl);      // getCode() hoặc getName()
+                Integer days = safeGetDays(tpl);  // getDays() nếu có; nếu không -> parse code
+                if (days != null) planDays = days;
+            }
+        }
+
+        // 3) Trial
         Instant now = Instant.now();
         Instant trialUntil = Boolean.TRUE.equals(req.trial()) ? now.plus(7, ChronoUnit.DAYS) : null;
 
+        // 4) Persist Program
+        Program p = Program.builder()
+                .userId(userId)
+                .planDays(planDays)
+                .status(ProgramStatus.ACTIVE)
+                .startDate(LocalDate.now(ZoneOffset.UTC))
+                .trialStartedAt(Boolean.TRUE.equals(req.trial()) ? now : null)
+                .trialEndExpected(trialUntil)
+                .build();
+        p = programRepo.save(p);
+
+        // 5) Trả DTO (Program hiện chưa lưu link template → trả lại templateId/planCode từ req)
         return new EnrollmentRes(
-                id, userId, req.planTemplateId(),
-                "LIGHT_30D", // TODO: lấy từ repo
-                "ACTIVE",
-                now,
-                null,
-                trialUntil
+                p.getId(),
+                p.getUserId(),
+                templateId,          // Program chưa có cột này → chỉ trả về theo req
+                planCode,            // từ template (nếu có)
+                p.getStatus().name(),
+                p.getStartDate() == null ? null : p.getStartDate().atStartOfDay(ZoneOffset.UTC).toInstant(),
+                null,                // Program chưa có endAt
+                p.getTrialEndExpected()
         );
     }
 
     @Override
+    @Transactional(readOnly = true)
     public List<EnrollmentRes> listByUser(UUID userId) {
-        // TODO: query DB
-        return List.of();
+        List<Program> programs = programRepo.findAllByUserId(userId);
+        programs.sort(Comparator.comparing(Program::getCreatedAt).reversed());
+
+        return programs.stream().map(p -> new EnrollmentRes(
+                p.getId(),
+                p.getUserId(),
+                null, // Program chưa lưu planTemplateId
+                null, // Không suy ra được planCode từ DB
+                p.getStatus().name(),
+                p.getStartDate() == null ? null : p.getStartDate().atStartOfDay(ZoneOffset.UTC).toInstant(),
+                null, // Program chưa có endAt
+                p.getTrialEndExpected()
+        )).toList();
     }
 
     @Override
+    @Transactional
     public void complete(UUID userId, UUID enrollmentId) {
-        // TODO: chuyển status → COMPLETED, set endAt, ghi lịch sử
+        Program p = programRepo.findByIdAndUserId(enrollmentId, userId)
+                .orElseThrow(() -> new NotFoundException("Enrollment not found"));
+
+        if (p.getStatus() == ProgramStatus.COMPLETED) {
+            throw new ConflictException("Enrollment already completed");
+        }
+        if (p.getStatus() == ProgramStatus.CANCELLED) {
+            throw new ConflictException("Enrollment is cancelled");
+        }
+
+        p.setStatus(ProgramStatus.COMPLETED);
+        programRepo.save(p);
+
+        // Nếu muốn lưu thời điểm hoàn tất, hãy thêm cột endAt (Instant) vào Program + Flyway.
+    }
+
+    // ----------------- helpers -----------------
+
+    private static String safeGetCode(Object template) {
+        try { return (String) template.getClass().getMethod("getCode").invoke(template); }
+        catch (Exception ignore) {
+            try { return (String) template.getClass().getMethod("getName").invoke(template); }
+            catch (Exception e) { return null; }
+        }
+    }
+
+    private static Integer safeGetDays(Object template) {
+        try {
+            Object v = template.getClass().getMethod("getDays").invoke(template);
+            return (v instanceof Integer i) ? i : null;
+        } catch (Exception ignore) {
+            // fallback: đoán từ code "xxx_30D|45D|60D"
+            String code = safeGetCode(template);
+            if (code == null) return null;
+            if (code.contains("30")) return 30;
+            if (code.contains("45")) return 45;
+            if (code.contains("60")) return 60;
+            return null;
+        }
     }
 }

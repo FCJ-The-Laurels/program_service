@@ -4,6 +4,7 @@ import com.smokefree.program.domain.model.Program;
 import com.smokefree.program.domain.model.ProgramStatus;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
+import org.springframework.stereotype.Repository;
 
 import java.util.Collection;
 import java.util.List;
@@ -27,6 +28,11 @@ public interface ProgramRepository extends JpaRepository<Program, UUID> {
     @Query("select p.id from Program p where p.id in :ids and p.coachId = :coachId")
     List<UUID> findIdsByIdInAndCoachId(Collection<UUID> ids, UUID coachId);
 
-    boolean existsById(UUID id);                // vẫn giữ để xài chỗ khác
+    boolean existsById(UUID id);
+    // vẫn giữ để xài chỗ khác
+    List<Program> findAllByUserId(UUID userId);
+
+    // Lấy 1 program theo id + user (đảm bảo quyền sở hữu)
+    Optional<Program> findByIdAndUserId(UUID id, UUID userId);
 
 }

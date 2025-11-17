@@ -1,27 +1,12 @@
-// TemplateUpsertReq.java
+// com.smokefree.program.web.dto.quiz.template.TemplateUpsertReq
 package com.smokefree.program.web.dto.quiz.template;
 
-import com.smokefree.program.domain.model.QuestionType;
+import jakarta.validation.constraints.NotBlank;
+import jakarta.validation.constraints.Size;
 import java.util.List;
 
 public record TemplateUpsertReq(
-        String name,
+        @NotBlank String name,
         String languageCode,
-        List<QuestionUpsertReq> questions
-) {
-    public record QuestionUpsertReq(
-            Integer questionNo,
-            String text,
-            QuestionType type,
-            Integer points,
-            String explanation,
-            List<ChoiceUpsertReq> choices
-    ) {}
-
-    public record ChoiceUpsertReq(
-            String labelCode,
-            String labelText,
-            Boolean correct,
-            Integer weight
-    ) {}
-}
+        @Size(min = 1) List<QuestionUpsertReq> questions
+) {}
