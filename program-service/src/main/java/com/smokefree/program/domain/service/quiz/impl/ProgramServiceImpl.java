@@ -66,5 +66,8 @@ public class ProgramServiceImpl implements ProgramService {
                 p.getCurrentDay(), p.getSeverity(), p.getTotalScore(), ent, access
         );
     }
-
+    @Override
+    public List<Program> listByUser(UUID userId) {
+        return repo.findByUserIdOrderByCreatedAtDesc(userId);
+    }
 }

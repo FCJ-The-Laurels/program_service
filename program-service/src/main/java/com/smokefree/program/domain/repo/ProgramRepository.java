@@ -35,4 +35,5 @@ public interface ProgramRepository extends JpaRepository<Program, UUID> {
     // Lấy 1 program theo id + user (đảm bảo quyền sở hữu)
     Optional<Program> findByIdAndUserId(UUID id, UUID userId);
 
+    List<Program> findByUserIdOrderByCreatedAtDesc(UUID userId);
 }

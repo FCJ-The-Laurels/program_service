@@ -31,14 +31,14 @@ public class QuizAssignmentServiceImpl implements QuizAssignmentService {
                                  List<UUID> programIds,
                                  int everyDays,
                                  UUID actorId,
-                                 String scope) {
+                                 AssignmentScope scope) {
         if (programIds == null || programIds.isEmpty()) return;
 
         // "coach" ở tham số scope đang dùng như quyền tác giả
-        boolean authorIsCoach = "coach".equalsIgnoreCase(scope);
+//        boolean authorIsCoach = "coach".equalsIgnoreCase(scope);
 
         // scope lưu xuống DB là enum AssignmentScope (DAY/WEEK/PROGRAM/CUSTOM)
-        AssignmentScope assignmentScope = parseAssignmentScope(scope);
+//        AssignmentScope assignmentScope = parseAssignmentScope(scope);
 
         UUID createdBy = (actorId != null) ? actorId : SYSTEM_USER_ID;
         Instant now = Instant.now();
@@ -46,9 +46,9 @@ public class QuizAssignmentServiceImpl implements QuizAssignmentService {
         List<QuizAssignment> batch = new ArrayList<>(programIds.size());
         for (UUID pid : programIds) {
             // xác minh quyền coach
-            if (authorIsCoach && !programRepo.existsByIdAndCoachId(pid, createdBy)) {
-                continue;
-            }
+//            if (authorIsCoach && !programRepo.existsByIdAndCoachId(pid, createdBy)) {
+//                continue;
+//            }
             // tránh trùng
             if (assignmentRepo.existsByTemplateIdAndProgramId(templateId, pid)) {
                 continue;
@@ -59,7 +59,7 @@ public class QuizAssignmentServiceImpl implements QuizAssignmentService {
             a.setTemplateId(templateId);
             a.setProgramId(pid);
             a.setEveryDays(everyDays);
-            a.setScope(assignmentScope);                 // enum OK
+            a.setScope(scope);                 // enum OK
             a.setOrigin(QuizAssignmentOrigin.MANUAL);    // ★ bắt buộc để tránh NULL
             a.setCreatedAt(now);
             a.setCreatedBy(createdBy);
@@ -72,14 +72,14 @@ public class QuizAssignmentServiceImpl implements QuizAssignmentService {
         }
     }
 
-    private AssignmentScope parseAssignmentScope(String s) {
-        try {
-            return (s == null) ? AssignmentScope.DAY
-                    : AssignmentScope.valueOf(s.trim().toUpperCase());
-        } catch (IllegalArgumentException ignore) {
-            return AssignmentScope.DAY;
-        }
-    }
+//    private AssignmentScope parseAssignmentScope(String s) {
+//        try {
+//            return (s == null) ? AssignmentScope.DAY
+//                    : AssignmentScope.valueOf(s.trim().toUpperCase());
+//        } catch (IllegalArgumentException ignore) {
+//            return AssignmentScope.DAY;
+//        }
+//    }
 
     @Override
     public List<QuizAssignment> listAssignmentsByProgram(UUID programId) {

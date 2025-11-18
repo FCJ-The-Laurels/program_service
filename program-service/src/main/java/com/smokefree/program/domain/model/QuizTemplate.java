@@ -5,7 +5,6 @@ import lombok.*;
 import org.hibernate.annotations.JdbcType;
 import org.hibernate.dialect.PostgreSQLEnumJdbcType;
 
-
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
@@ -23,7 +22,8 @@ import java.util.UUID;
                 columnNames = {"name","scope","owner_id","version"}
         )
 )
-@Getter @Setter
+@Getter
+@Setter
 @NoArgsConstructor
 @AllArgsConstructor
 @Builder
@@ -35,29 +35,30 @@ public class QuizTemplate {
     @Column(name = "name", nullable = false)
     private String name;
 
-    // version có thể null (để unique still work theo chuẩn Postgres – null != null)
-    @Column(name = "version")
+    // DB: DEFAULT 1 NOT NULL
+    @Column(name = "version", nullable = false)
     private Integer version;
 
     @Enumerated(EnumType.STRING)
     @JdbcType(PostgreSQLEnumJdbcType.class)
-    @Column(name = "status",
+    @Column(
+            name = "status",
             nullable = false,
-            columnDefinition = "program.quiz_template_status")
+            columnDefinition = "program.quiz_template_status"
+    )
     private QuizTemplateStatus status;
 
     @Column(name = "language_code")
     private String languageCode;
 
+    // DB: scope text DEFAULT 'system'
+    // -> dùng enum ở Java, lưu EnumType.STRING vào cột text
     @Enumerated(EnumType.STRING)
-    @JdbcType(PostgreSQLEnumJdbcType.class)
-    @Column(name = "scope",
-            nullable = false,
-            columnDefinition = "program.quiz_template_scope")
-    private QuizTemplateScope scope;    // SYSTEM | COACH
+    @Column(name = "scope", nullable = false)
+    private QuizTemplateScope scope;     // SYSTEM | COACH (MVP luôn SYSTEM)
 
     @Column(name = "owner_id")
-    private UUID ownerId;               // null với system, có giá trị với coach
+    private UUID ownerId;                // luôn null trong MVP (template hệ thống)
 
     @Column(name = "published_at")
     private Instant publishedAt;
@@ -71,7 +72,6 @@ public class QuizTemplate {
     @Column(name = "updated_at", nullable = false)
     private Instant updatedAt;
 
-    // Chú ý: mappedBy="template" khi child có @ManyToOne QuizTemplate template
     @OneToMany(mappedBy = "template", cascade = CascadeType.ALL, orphanRemoval = true)
     @OrderBy("id.questionNo ASC")
     private List<QuizTemplateQuestion> questions = new ArrayList<>();
@@ -79,17 +79,32 @@ public class QuizTemplate {
     @PrePersist
     void prePersist() {
         Instant now = Instant.now();
-        if (id == null)              id = UUID.randomUUID();
-        if (createdAt == null)       createdAt = now;
-        if (updatedAt == null)       updatedAt = now;
 
-        // mặc định an toàn
-        if (status == null)          status = QuizTemplateStatus.DRAFT;
-
-        // chuẩn hoá scope theo ownerId
-        if (scope == null) {
-            scope = (ownerId == null) ? QuizTemplateScope.SYSTEM : QuizTemplateScope.COACH;
+        if (id == null) {
+            id = UUID.randomUUID();
         }
+        if (createdAt == null) {
+            createdAt = now;
+        }
+        if (updatedAt == null) {
+            updatedAt = now;
+        }
+        // version mặc định 1
+        if (version == null) {
+            version = 1;
+        }
+        // trạng thái mặc định DRAFT
+        if (status == null) {
+            status = QuizTemplateStatus.DRAFT;
+        }
+        // ngôn ngữ mặc định 'vi'
+        if (languageCode == null || languageCode.isBlank()) {
+            languageCode = "vi";
+        }
+
+        // MVP: mọi template là SYSTEM, ownerId = null
+        scope   = QuizTemplateScope.SYSTEM;
+        ownerId = null;
 
         // name bắt buộc
         if (name == null || name.isBlank()) {
@@ -100,6 +115,9 @@ public class QuizTemplate {
     @PreUpdate
     void preUpdate() {
         updatedAt = Instant.now();
-        // scope là enum → không cần trim/lowercase
+
+        // Giữ ràng buộc SYSTEM-only trong mọi lần update
+        scope   = QuizTemplateScope.SYSTEM;
+        ownerId = null;
     }
 }

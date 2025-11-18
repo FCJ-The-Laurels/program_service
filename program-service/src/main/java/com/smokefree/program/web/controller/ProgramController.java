@@ -7,6 +7,7 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.*;
 
 import java.time.Instant;
+import java.util.List;
 import java.util.UUID;
 
 @RestController
@@ -29,5 +30,12 @@ public class ProgramController {
                                 @RequestHeader(value="X-User-Tier", required=false) String tier) {
         var p = programService.getActive(userId).orElseThrow(() -> new NotFoundException("No ACTIVE program"));
         return programService.toRes(p, entState, entExp == null ? null : Instant.parse(entExp), tier);
+    }
+    @GetMapping
+    public List<ProgramRes> listByUser(@RequestHeader("X-User-Id") UUID userId,
+                                       @RequestHeader(value="X-User-Tier", required=false) String tier) {
+        return programService.listByUser(userId).stream()
+                .map(p -> programService.toRes(p, null, null, tier))
+                .toList();
     }
 }
