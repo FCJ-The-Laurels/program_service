@@ -11,7 +11,11 @@ public interface StepAssignmentService {
     List<StepAssignment> listByProgram(UUID programId);
     StepAssignment getOne(UUID programId, UUID id);
     StepAssignment create(UUID programId, CreateStepAssignmentReq req);
-    StepAssignment updateStatus(UUID programId, UUID id, StepStatus status);
+    void updateStatus(UUID userId,
+                      UUID programId,
+                      UUID assignmentId,
+                      StepStatus status,
+                      String note);
     void delete(UUID programId, UUID id);
 
 }

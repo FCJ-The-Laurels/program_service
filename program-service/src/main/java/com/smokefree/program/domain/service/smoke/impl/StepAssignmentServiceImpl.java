@@ -9,12 +9,14 @@ import com.smokefree.program.domain.repo.StepAssignmentRepository;
 
 import com.smokefree.program.domain.service.smoke.StepAssignmentService;
 import com.smokefree.program.web.dto.step.CreateStepAssignmentReq;
+import com.smokefree.program.web.error.NotFoundException;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.server.ResponseStatusException;
 
+import java.time.Instant;
 import java.util.List;
 import java.util.UUID;
 
@@ -69,10 +71,29 @@ public class StepAssignmentServiceImpl implements StepAssignmentService {
 
 
     @Override
-    public StepAssignment updateStatus(UUID programId, UUID id, StepStatus status) {
-        StepAssignment sa = getOne(programId, id);
+    @Transactional
+    public void updateStatus(UUID userId,
+                             UUID programId,
+                             UUID assignmentId,
+                             StepStatus status,
+                             String note) {
+
+        // 1) Đảm bảo program thuộc về user
+        Program program = programRepo
+                .findByIdAndUserId(programId, userId)
+                .orElseThrow(() -> new NotFoundException("Program not found"));
+
+        // 2) Lấy step trong đúng program
+        StepAssignment sa = stepRepo
+                .findByIdAndProgramId(assignmentId, program.getId())
+                .orElseThrow(() -> new NotFoundException("Step assignment not found"));
+
+        // 3) Cập nhật trạng thái
         sa.setStatus(status);
-        return stepRepo.save(sa);
+        sa.setNote(note);
+        sa.setUpdatedAt(Instant.now());
+
+        stepRepo.save(sa);
     }
 
     @Override

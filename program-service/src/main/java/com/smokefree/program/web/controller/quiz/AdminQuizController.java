@@ -18,7 +18,7 @@ import java.util.UUID;
 // src/main/java/com/smokefree/program/web/controller/quiz/AdminQuizController.java
 
 @RestController
-@RequestMapping("/quiz")
+@RequestMapping("/quiz/admin")
 @RequiredArgsConstructor
 public class AdminQuizController {
 
@@ -48,5 +48,12 @@ public class AdminQuizController {
 
     private UUID getUserId() {
         return com.smokefree.program.util.SecurityUtil.requireUserId();
+    }
+    @PatchMapping("/templates/{id}/publish")
+    @PreAuthorize("hasRole('ADMIN')")
+    public TemplateRes publish(@PathVariable UUID id) {
+        UUID userId = SecurityUtil.requireUserId();
+        var t = templateService.publish(id, userId);
+        return new TemplateRes(t.getId(), t.getName(), t.getVersion(), t.getStatus().name());
     }
 }

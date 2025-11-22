@@ -4,7 +4,9 @@ import com.smokefree.program.domain.model.StepAssignment;
 import com.smokefree.program.domain.model.StepStatus;
 
 import com.smokefree.program.domain.service.smoke.StepAssignmentService;
+import com.smokefree.program.util.SecurityUtil;
 import com.smokefree.program.web.dto.step.CreateStepAssignmentReq;
+import com.smokefree.program.web.dto.step.UpdateStepStatusReq;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -47,12 +49,14 @@ public class StepAssignmentController {
     }
 
     @PatchMapping("/{id}/status")
-    @PreAuthorize("isAuthenticated()")
-    public StepAssignment updateStatus(@PathVariable UUID programId,
-                                       @PathVariable UUID id,
-                                       @RequestParam StepStatus status) {
-        log.info("[Step] UPDATE-STATUS programId={}, id={}, status={}", programId, id, status);
-        return service.updateStatus(programId, id, status);
+    @PreAuthorize("hasRole('USER')")
+    public void updateStatus(@PathVariable("programId") UUID programId,
+                             @PathVariable("id") UUID assignmentId,
+                             @RequestBody UpdateStepStatusReq req) {
+
+        UUID userId = SecurityUtil.requireUserId();
+        StepStatus status = req.status();
+        service.updateStatus(userId, programId, assignmentId, status, req.note());
     }
 
     @DeleteMapping("/{id}")

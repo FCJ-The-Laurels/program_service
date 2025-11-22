@@ -40,4 +40,19 @@ public class QuizChoiceLabel {
             this.id.setQuestionNo(q.getId().getQuestionNo());
         }
     }
+    @PrePersist
+    public void prePersist() {
+        if (question == null) {
+            return;
+        }
+        if (this.id == null) {
+            this.id = new QuizChoiceLabelId();
+        }
+        // Lấy templateId & questionNo từ question
+        QuizTemplateQuestionId qId = question.getId();
+        this.id.setTemplateId(qId.getTemplateId());
+        this.id.setQuestionNo(qId.getQuestionNo());
+        // labelCode đã được set sẵn trong createTemplate: new QuizChoiceLabelId(null, null, labelCode)
+        // hoặc bạn bảo đảm: if (this.id.getLabelCode() == null) this.id.setLabelCode(...)
+    }
 }

@@ -10,6 +10,7 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
 
+import java.util.List;
 import java.util.UUID;
 
 @RestController
@@ -45,4 +46,27 @@ public class EnrollmentController {
     }
 
     // Nếu đang có POST /api/enrollments cũ, có thể giữ tạm & @Deprecated
+
+    @PostMapping
+    @PreAuthorize("hasRole('USER')")
+    public EnrollmentRes start(@RequestBody StartEnrollmentReq req) {
+        UUID userId = SecurityUtil.requireUserId();
+        return enrollmentService.startTrialOrPaid(userId, req);
+    }
+
+    // 2) Lấy danh sách enrollments của user hiện tại
+    @GetMapping
+    @PreAuthorize("hasRole('USER')")
+    public List<EnrollmentRes> listMine() {
+        UUID userId = SecurityUtil.requireUserId();
+        return enrollmentService.listByUser(userId);
+    }
+
+    // 3) Complete một enrollment
+    @PostMapping("/{id}/complete")
+    @PreAuthorize("hasRole('USER')")
+    public void complete(@PathVariable("id") UUID enrollmentId) {
+        UUID userId = SecurityUtil.requireUserId();
+        enrollmentService.complete(userId, enrollmentId);
+    }
 }
