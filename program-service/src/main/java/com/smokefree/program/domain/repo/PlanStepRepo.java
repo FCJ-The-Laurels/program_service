@@ -9,5 +9,5 @@ import java.util.UUID;
 
 public interface PlanStepRepo extends JpaRepository<PlanStep, UUID> {
     List<PlanStep> findByTemplateIdOrderByDayNoAscSlotAsc(UUID templateId);
-
+//    List<PlanStep> findByTemplateIdOrderByDayNoAscSlotNoAsc(UUID templateId);
 }

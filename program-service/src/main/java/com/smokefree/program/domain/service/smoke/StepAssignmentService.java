@@ -1,5 +1,7 @@
 package com.smokefree.program.domain.service.smoke;
 
+import com.smokefree.program.domain.model.PlanTemplate;
+import com.smokefree.program.domain.model.Program;
 import com.smokefree.program.domain.model.StepAssignment;
 import com.smokefree.program.domain.model.StepStatus;
 import com.smokefree.program.web.dto.step.CreateStepAssignmentReq;
@@ -17,5 +19,5 @@ public interface StepAssignmentService {
                       StepStatus status,
                       String note);
     void delete(UUID programId, UUID id);
-
+    void createForProgramFromTemplate(Program program, PlanTemplate template);
 }

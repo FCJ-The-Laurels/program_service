@@ -1,6 +1,7 @@
 package com.smokefree.program.domain.repo;
 
 import com.smokefree.program.domain.model.StepAssignment;
+import com.smokefree.program.domain.model.StepStatus;
 import org.springframework.data.jpa.repository.JpaRepository;
 
 import java.util.*;
@@ -22,4 +23,10 @@ public interface StepAssignmentRepository extends JpaRepository<StepAssignment, 
     Optional<StepAssignment> findByProgramIdAndStepNo(UUID programId, Integer stepNo);
 
     void deleteByIdAndProgramId(UUID id, UUID programId);
+    long countByProgramIdAndStatusNot(UUID programId, StepStatus status);
+    long countByProgramIdAndStepNoLessThanAndStatusNot(
+            UUID programId,
+            Integer stepNo,
+            StepStatus status
+    );
 }
