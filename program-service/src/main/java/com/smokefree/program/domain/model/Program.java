@@ -68,4 +68,13 @@ public class Program {
     // Thêm nếu DB có cột này
     @Column(name = "streak_frozen_until")
     private OffsetDateTime streakFrozenUntil;
+
+    @Column(name = "plan_template_id")
+    private UUID planTemplateId;
+
+    @Column(name = "template_code")
+    private String templateCode;
+
+    @Column(name = "template_name")
+    private String templateName;
 }

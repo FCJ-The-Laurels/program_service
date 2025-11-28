@@ -11,6 +11,6 @@ import java.util.UUID;
 public interface QuizFlowService {
     List<DueItem> listDue(UUID userId);
     OpenAttemptRes openAttempt(UUID userId, UUID templateId);
-    void saveAnswer(UUID userId, UUID templateId, UUID attemptId, AnswerReq req);
-    SubmitRes submit(UUID userId, UUID templateId, UUID attemptId);
+    void saveAnswer(UUID userId, UUID attemptId, AnswerReq req);
+    SubmitRes submit(UUID userId, UUID attemptId);
 }

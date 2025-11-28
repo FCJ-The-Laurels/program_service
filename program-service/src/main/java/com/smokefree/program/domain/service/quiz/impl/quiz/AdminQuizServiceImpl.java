@@ -36,11 +36,36 @@ public class AdminQuizServiceImpl implements AdminQuizService {
     }
 
     @Override
+    public QuizTemplate updateTemplate(UUID templateId, String name, Integer version) {
+        QuizTemplate t = tplRepo.findById(templateId)
+                .orElseThrow(() -> new IllegalArgumentException("Template not found"));
+        
+        if (name != null && !name.isBlank()) {
+            t.setName(name);
+        }
+        if (version != null) {
+            t.setVersion(version);
+        }
+        t.setUpdatedAt(Instant.now());
+        return tplRepo.save(t);
+    }
+
+    @Override
     public void publishTemplate(UUID templateId) {
         QuizTemplate t = tplRepo.findById(templateId)
                 .orElseThrow(() -> new IllegalArgumentException("Template not found"));
         t.setStatus(QuizTemplateStatus.PUBLISHED);
         t.setPublishedAt(Instant.now());
+        t.setUpdatedAt(Instant.now());
+        tplRepo.save(t);
+    }
+
+    @Override
+    public void archiveTemplate(UUID templateId) {
+        QuizTemplate t = tplRepo.findById(templateId)
+                .orElseThrow(() -> new IllegalArgumentException("Template not found"));
+        t.setStatus(QuizTemplateStatus.ARCHIVED);
+        t.setArchivedAt(Instant.now());
         t.setUpdatedAt(Instant.now());
         tplRepo.save(t);
     }

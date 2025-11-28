@@ -10,8 +10,11 @@ import java.util.UUID;
 
 public interface AdminQuizService {
     QuizTemplate createTemplate(String name);
+    QuizTemplate updateTemplate(UUID templateId, String name, Integer version);
     void publishTemplate(UUID templateId);
-     QuizTemplateQuestionId addQuestion(
+    void archiveTemplate(UUID templateId);
+
+    QuizTemplateQuestionId addQuestion(
             UUID templateId,
             Integer orderNo,
             String text,

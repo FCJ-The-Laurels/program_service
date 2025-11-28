@@ -29,4 +29,6 @@ public interface StepAssignmentRepository extends JpaRepository<StepAssignment, 
             Integer stepNo,
             StepStatus status
     );
+
+    List<StepAssignment> findByProgramIdAndPlannedDay(UUID programId, int plannedDay);
 }

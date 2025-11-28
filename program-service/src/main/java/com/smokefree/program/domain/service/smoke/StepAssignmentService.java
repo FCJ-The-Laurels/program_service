@@ -18,6 +18,11 @@ public interface StepAssignmentService {
                       UUID assignmentId,
                       StepStatus status,
                       String note);
+
+    /**
+     * Reschedule a step assignment to a new scheduled date/time with validation and access checks.
+     */
+    StepAssignment reschedule(UUID programId, UUID assignmentId, java.time.OffsetDateTime newScheduledAt);
     void delete(UUID programId, UUID id);
     void createForProgramFromTemplate(Program program, PlanTemplate template);
 }

@@ -5,7 +5,8 @@ import com.smokefree.program.web.dto.subscription.UpgradeReq;
 
 import java.util.UUID;
 
-public interface SubscriptionService {
+public interface
+SubscriptionService {
     SubscriptionStatusRes getStatus(UUID userId);
     SubscriptionStatusRes upgrade(UUID userId, UpgradeReq req);
 }

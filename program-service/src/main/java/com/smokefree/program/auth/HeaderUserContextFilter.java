@@ -7,11 +7,13 @@ import jakarta.servlet.http.HttpServletResponse;
 import org.springframework.core.env.Environment;
 import org.springframework.lang.NonNull;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
+import org.springframework.security.core.GrantedAuthority; // Import GrantedAuthority
 import org.springframework.security.core.authority.SimpleGrantedAuthority;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.web.filter.OncePerRequestFilter;
 
 import java.io.IOException;
+import java.util.ArrayList; // Sử dụng ArrayList
 import java.util.Arrays;
 import java.util.List;
 import java.util.UUID;
@@ -30,53 +32,70 @@ public class HeaderUserContextFilter extends OncePerRequestFilter {
             @NonNull HttpServletResponse res,
             @NonNull FilterChain chain) throws ServletException, IOException {
 
-        String uid  = req.getHeader("X-User-Id");
-        String role = req.getHeader("X-User-Role");
-
         // Nếu đã có Authentication thì bỏ qua
         if (SecurityContextHolder.getContext().getAuthentication() != null) {
             chain.doFilter(req, res);
             return;
         }
 
+        // Đọc các header
+        String uid = req.getHeader("X-User-Id");
+        String role = req.getHeader("X-User-Role");
+        String tier = req.getHeader("X-User-Tier"); // <-- Đọc thêm header tier
+
         boolean isDev = Arrays.asList(env.getActiveProfiles()).contains("dev");
 
-        // Thiếu header
+        // Thiếu header vai trò chính
         if (uid == null || uid.isBlank() || role == null || role.isBlank()) {
             if (isDev) { // dev thì cho qua
                 chain.doFilter(req, res);
                 return;
             }
-            res.setStatus(HttpServletResponse.SC_UNAUTHORIZED);
-            res.setContentType("application/json");
-            res.getWriter().write(
-                    "{\"error\":\"unauthorized\",\"message\":\"Missing or invalid X-User-Id / X-User-Role\"}"
-            );
+            // Trả lỗi nếu không phải dev
+            sendUnauthorizedResponse(res, "Missing or invalid X-User-Id / X-User-Role");
             return;
         }
 
         // Có header → validate & set Authentication
         try {
-            UUID userId = UUID.fromString(uid.trim());
+            UUID.fromString(uid.trim()); // Chỉ kiểm tra định dạng UUID
+
+            // *** LOGIC NÂNG CẤP BẮT ĐẦU TỪ ĐÂY ***
+            List<GrantedAuthority> authorities = new ArrayList<>();
+
+            // 1. Thêm vai trò chính (ROLE_)
+            authorities.add(new SimpleGrantedAuthority("ROLE_" + role.trim().toUpperCase()));
+
+            // 2. Nếu là CUSTOMER và có tier, thêm quyền tier (TIER_)
+            if ("CUSTOMER".equalsIgnoreCase(role.trim()) && tier != null && !tier.isBlank()) {
+                authorities.add(new SimpleGrantedAuthority("TIER_" + tier.trim().toUpperCase()));
+            }
+            // *** KẾT THÚC LOGIC NÂNG CẤP ***
+
             var auth = new UsernamePasswordAuthenticationToken(
-                    userId.toString(),
+                    uid.trim(), // Giữ principal là chuỗi UUID
                     "N/A",
-                    List.of(new SimpleGrantedAuthority("ROLE_" + role.trim().toUpperCase()))
+                    authorities // <-- Sử dụng danh sách quyền đã được nâng cấp
             );
             SecurityContextHolder.getContext().setAuthentication(auth);
+
         } catch (IllegalArgumentException ex) {
-            if (isDev) { // dev thì cho qua
+            if (isDev) {
                 chain.doFilter(req, res);
                 return;
             }
-            res.setStatus(HttpServletResponse.SC_UNAUTHORIZED);
-            res.setContentType("application/json");
-            res.getWriter().write(
-                    "{\"error\":\"unauthorized\",\"message\":\"X-User-Id must be a valid UUID\"}"
-            );
+            sendUnauthorizedResponse(res, "X-User-Id must be a valid UUID");
             return;
         }
 
         chain.doFilter(req, res);
+    }
+
+    private void sendUnauthorizedResponse(HttpServletResponse res, String message) throws IOException {
+        res.setStatus(HttpServletResponse.SC_UNAUTHORIZED);
+        res.setContentType("application/json");
+        res.getWriter().write(
+                "{\"error\":\"unauthorized\",\"message\":\"" + message + "\"}"
+        );
     }
 }

@@ -6,6 +6,7 @@ import com.smokefree.program.web.dto.smoke.CreateSmokeEventReq;
 import com.smokefree.program.web.dto.smoke.SmokeEventRes;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.UUID;
@@ -17,6 +18,7 @@ public class SmokeEventController {
     private final SmokeEventService service;
 
     @PostMapping
+    @PreAuthorize("isAuthenticated()")
     public SmokeEventRes create(@PathVariable UUID programId,
                                 @Valid @RequestBody CreateSmokeEventReq req) {
         var e = service.create(programId, req);

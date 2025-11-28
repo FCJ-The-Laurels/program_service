@@ -1,20 +1,24 @@
 package com.smokefree.program.domain.service.smoke.impl;
 
-
 import com.smokefree.program.domain.model.Streak;
 import com.smokefree.program.domain.model.StreakBreak;
+import com.smokefree.program.domain.model.Program;
 import com.smokefree.program.domain.repo.StreakBreakRepository;
 import com.smokefree.program.domain.repo.StreakRepository;
-
 import com.smokefree.program.domain.service.smoke.StreakService;
 import com.smokefree.program.web.dto.streak.StreakBreakRes;
 import com.smokefree.program.web.dto.streak.StreakView;
+import com.smokefree.program.web.error.ForbiddenException;
+import com.smokefree.program.web.error.NotFoundException;
+import com.smokefree.program.domain.repo.ProgramRepository;
+import com.smokefree.program.util.SecurityUtil;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
-import java.time.*;
+import java.time.OffsetDateTime;
+import java.time.ZoneOffset;
 import java.time.temporal.ChronoUnit;
 import java.util.List;
 import java.util.UUID;
@@ -25,31 +29,37 @@ public class StreakServiceImpl implements StreakService {
 
     private final StreakRepository streakRepo;
     private final StreakBreakRepository breakRepo;
+    private final ProgramRepository programRepository;
 
     private static int daysBetween(OffsetDateTime start, OffsetDateTime end) {
+        if (start == null || end == null) return 0;
         var s = start.toInstant().atOffset(ZoneOffset.UTC).toLocalDate();
         var e = end.toInstant().atOffset(ZoneOffset.UTC).toLocalDate();
         return (int) ChronoUnit.DAYS.between(s, e);
     }
 
-    @Override @Transactional
+    @Override
+    @Transactional
     public StreakView start(UUID programId, OffsetDateTime startedAt) {
+        ensureProgramAccess(programId, false);
         var cur = streakRepo.findFirstByProgramIdAndEndedAtIsNullOrderByStartedAtDesc(programId);
         if (cur.isPresent()) {
             var s = cur.get();
             int days = daysBetween(s.getStartedAt(), OffsetDateTime.now(ZoneOffset.UTC));
-            return new StreakView(s.getId(), days, s.getStartedAt(), s.getEndedAt());
+            return new StreakView(s.getId(), days, null, null, s.getStartedAt(), s.getEndedAt());
         }
         var s = new Streak();
         s.setId(UUID.randomUUID());
         s.setProgramId(programId);
         s.setStartedAt(startedAt != null ? startedAt : OffsetDateTime.now(ZoneOffset.UTC));
         streakRepo.save(s);
-        return new StreakView(s.getId(), 0, s.getStartedAt(), null);
+        return new StreakView(s.getId(), 0, null, null, s.getStartedAt(), null);
     }
 
-    @Override @Transactional
+    @Override
+    @Transactional
     public StreakView breakStreak(UUID programId, OffsetDateTime brokenAt, UUID smokeEventId, String note) {
+        ensureProgramAccess(programId, false);
         var s = streakRepo.findFirstByProgramIdAndEndedAtIsNullOrderByStartedAtDesc(programId)
                 .orElseGet(() -> {
                     var ns = new Streak();
@@ -67,6 +77,7 @@ public class StreakServiceImpl implements StreakService {
         }
 
         var b = new StreakBreak();
+        b.setId(UUID.randomUUID()); // Ensure ID is set
         b.setStreakId(s.getId());
         b.setProgramId(programId);
         b.setSmokeEventId(smokeEventId);
@@ -75,21 +86,23 @@ public class StreakServiceImpl implements StreakService {
         b.setNote(note);
         breakRepo.save(b);
 
-        // trả về tóm tắt streak vừa đóng
-        return new StreakView(s.getId(), s.getLengthDays() == null ? 0 : s.getLengthDays(), s.getStartedAt(), s.getEndedAt());
+        return new StreakView(s.getId(), s.getLengthDays() == null ? 0 : s.getLengthDays(), null, null, s.getStartedAt(), s.getEndedAt());
     }
 
     @Override
     public StreakView current(UUID programId) {
+        ensureProgramAccess(programId, true);
         var cur = streakRepo.findFirstByProgramIdAndEndedAtIsNullOrderByStartedAtDesc(programId);
-        if (cur.isEmpty()) return new StreakView(null, 0, null, null);
+        if (cur.isEmpty()) return new StreakView(null, 0, 0, 0, null, null);
+        
         var s = cur.get();
         int days = daysBetween(s.getStartedAt(), OffsetDateTime.now(ZoneOffset.UTC));
-        return new StreakView(s.getId(), days, s.getStartedAt(), s.getEndedAt());
+        return new StreakView(s.getId(), days, 0, 0, s.getStartedAt(), s.getEndedAt());
     }
 
     @Override
     public List<StreakView> history(UUID programId, int size) {
+        ensureProgramAccess(programId, true);
         return streakRepo.findByProgramIdOrderByStartedAtDesc(programId, PageRequest.of(0, Math.max(size, 1)))
                 .stream()
                 .map(s -> new StreakView(
@@ -97,6 +110,8 @@ public class StreakServiceImpl implements StreakService {
                         s.getEndedAt() == null
                                 ? daysBetween(s.getStartedAt(), OffsetDateTime.now(ZoneOffset.UTC))
                                 : (s.getLengthDays() == null ? 0 : s.getLengthDays()),
+                        null,
+                        null,
                         s.getStartedAt(),
                         s.getEndedAt()))
                 .toList();
@@ -104,11 +119,29 @@ public class StreakServiceImpl implements StreakService {
 
     @Override
     public List<StreakBreakRes> breaks(UUID programId, int size) {
+        ensureProgramAccess(programId, true);
         return breakRepo.findByProgramIdOrderByBrokenAtDesc(programId, PageRequest.of(0, Math.max(size, 1)))
                 .stream()
                 .map(b -> new StreakBreakRes(
                         b.getId(), b.getProgramId(), b.getStreakId(), b.getSmokeEventId(),
                         b.getBrokenAt(), b.getPrevStreakDays(), b.getNote(), b.getCreatedAt()))
                 .toList();
+    }
+
+    private void ensureProgramAccess(UUID programId, boolean allowCoachReadOnly) {
+        if (SecurityUtil.hasRole("ADMIN")) {
+            return;
+        }
+        UUID userId = SecurityUtil.requireUserId();
+        Program program = programRepository.findById(programId)
+                .orElseThrow(() -> new NotFoundException("Program not found: " + programId));
+        boolean isOwner = program.getUserId().equals(userId);
+        boolean isCoach = program.getCoachId() != null && program.getCoachId().equals(userId) && SecurityUtil.hasRole("COACH");
+        if (!isOwner && !isCoach) {
+            throw new ForbiddenException("Access denied for program " + programId);
+        }
+        if (isCoach && !allowCoachReadOnly) {
+            throw new ForbiddenException("Coach cannot modify streak for program " + programId);
+        }
     }
 }

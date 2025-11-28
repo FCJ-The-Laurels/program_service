@@ -11,4 +11,5 @@ public interface EnrollmentService {
     List<EnrollmentRes> listByUser(UUID userId);
     void complete(UUID userId, UUID enrollmentId);
 
+    EnrollmentRes activatePaid(UUID userId, UUID enrollmentId);
 }

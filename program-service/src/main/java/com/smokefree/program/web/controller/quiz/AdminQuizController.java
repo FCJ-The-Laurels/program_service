@@ -1,59 +1,60 @@
-// src/main/java/com/smokefree/program/web/controller/quiz/AdminQuizController.java
 package com.smokefree.program.web.controller.quiz;
 
-import com.smokefree.program.domain.model.AssignmentScope;
-import com.smokefree.program.domain.service.quiz.QuizAssignmentService;
-import com.smokefree.program.domain.service.quiz.QuizTemplateService;
-import com.smokefree.program.util.SecurityUtil;
-import com.smokefree.program.web.dto.quiz.assignment.AssignmentReq;
-import com.smokefree.program.web.dto.quiz.template.TemplateRes;
-import com.smokefree.program.web.dto.quiz.template.TemplateUpsertReq;
-import jakarta.validation.Valid;
+import com.smokefree.program.domain.model.QuizTemplate;
+import com.smokefree.program.domain.service.quiz.AdminQuizService;
+import com.smokefree.program.web.dto.quiz.admin.AddChoiceReq;
+import com.smokefree.program.web.dto.quiz.admin.AddQuestionReq;
+import com.smokefree.program.web.dto.quiz.template.CreateTemplateReq;
+import com.smokefree.program.web.dto.quiz.template.UpdateTemplateReq;
 import lombok.RequiredArgsConstructor;
-import org.springframework.security.access.prepost.PreAuthorize;
+import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
+import java.util.Map;
 import java.util.UUID;
 
-// src/main/java/com/smokefree/program/web/controller/quiz/AdminQuizController.java
-
 @RestController
-@RequestMapping("/quiz/admin")
+@RequestMapping("/v1/admin/quizzes")
 @RequiredArgsConstructor
 public class AdminQuizController {
 
-    private final QuizTemplateService templateService;
-    private final QuizAssignmentService assignmentService;
+    private final AdminQuizService adminQuizService;
 
-    @PostMapping("/templates")
-    @PreAuthorize("hasRole('ADMIN')")
-    public TemplateRes createSystem(@RequestBody @Valid TemplateUpsertReq req) {
-        UUID userId = getUserId();
-        var t = templateService.createSystemTemplate(req, userId);
-        return new TemplateRes(t.getId(), t.getName(), t.getVersion(), t.getStatus().name());
+    @PostMapping
+    public ResponseEntity<?> createTemplate(@RequestBody CreateTemplateReq req) {
+        var tpl = adminQuizService.createTemplate(req.name());
+        return ResponseEntity.ok(Map.of("id", tpl.getId(), "message", "Created successfully"));
     }
 
-    @PostMapping("/assignments")
-    @PreAuthorize("hasRole('ADMIN')")
-    public void assign(@RequestBody @Valid AssignmentReq req) {
-        UUID userId = getUserId();
-        assignmentService.assignToPrograms(
-                req.templateId(),
-                req.programIds(),
-                req.everyDays() == null ? 5 : req.everyDays(),
-                userId,
-                null    // scope: admin → dùng default (DAY) trong service
-        );
+    @PutMapping("/{id}")
+    public ResponseEntity<?> updateTemplate(@PathVariable UUID id, @RequestBody UpdateTemplateReq req) {
+        var tpl = adminQuizService.updateTemplate(id, req.name(), req.version());
+        return ResponseEntity.ok(Map.of("id", tpl.getId(), "message", "Updated successfully"));
     }
 
-    private UUID getUserId() {
-        return com.smokefree.program.util.SecurityUtil.requireUserId();
+    @PutMapping("/{id}/archive")
+    public ResponseEntity<?> archiveTemplate(@PathVariable UUID id) {
+        adminQuizService.archiveTemplate(id);
+        return ResponseEntity.ok(Map.of("message", "Archived successfully"));
     }
-    @PatchMapping("/templates/{id}/publish")
-    @PreAuthorize("hasRole('ADMIN')")
-    public TemplateRes publish(@PathVariable UUID id) {
-        UUID userId = SecurityUtil.requireUserId();
-        var t = templateService.publish(id, userId);
-        return new TemplateRes(t.getId(), t.getName(), t.getVersion(), t.getStatus().name());
+
+    @PostMapping("/{id}/publish")
+    public ResponseEntity<?> publishTemplate(@PathVariable UUID id) {
+        adminQuizService.publishTemplate(id);
+        return ResponseEntity.ok(Map.of("message", "Published successfully"));
+    }
+
+    @PostMapping("/{id}/questions")
+    public ResponseEntity<?> addQuestion(@PathVariable UUID id, @RequestBody AddQuestionReq req) {
+        // Fix: text() -> questionText(), type() -> type().name()
+        var qId = adminQuizService.addQuestion(id, req.orderNo(), req.questionText(), req.type().name(), req.points(), req.explanation());
+        return ResponseEntity.ok(Map.of("questionId", qId, "message", "Question added"));
+    }
+
+    @PostMapping("/{id}/questions/{qNo}/choices")
+    public ResponseEntity<?> addChoice(@PathVariable UUID id, @PathVariable Integer qNo, @RequestBody AddChoiceReq req) {
+        // Fix: text() -> labelText(), correct() -> isCorrect()
+        var cId = adminQuizService.addChoice(id, qNo, req.labelCode(), req.labelText(), req.isCorrect(), req.weight());
+        return ResponseEntity.ok(Map.of("choiceId", cId, "message", "Choice added"));
     }
 }

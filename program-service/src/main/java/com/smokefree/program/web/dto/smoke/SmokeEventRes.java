@@ -1,28 +1,29 @@
 package com.smokefree.program.web.dto.smoke;
 
-import com.smokefree.program.domain.model.SmokeEvent;
-import com.smokefree.program.domain.model.SmokeEventType;
-
-import java.time.Instant;
 import java.time.OffsetDateTime;
 import java.util.UUID;
 
 public record SmokeEventRes(
         UUID id,
-        UUID programId,
-        SmokeEventType eventType,
+        OffsetDateTime occurredAt,
+        String kind,
+        Integer puffs,
+        String reason,
+        String eventType,
         OffsetDateTime eventAt,
-        String note,
-        Instant createdAt
+        String note
 ) {
-    public static SmokeEventRes from(SmokeEvent e) {
+    public static SmokeEventRes from(com.smokefree.program.domain.model.SmokeEvent event) {
         return new SmokeEventRes(
-                e.getId(),
-                e.getProgramId(),
-                e.getEventType(),
-                e.getEventAt(),
-                e.getNote(),
-                e.getCreatedAt()
+                event.getId(),
+                event.getOccurredAt(),
+                event.getKind() != null ? event.getKind().name() : null,
+                event.getPuffs(),
+                event.getReason(),
+                event.getEventType() != null ? event.getEventType().name() : null,
+                event.getEventAt(),
+                event.getNote()
         );
     }
 }
+

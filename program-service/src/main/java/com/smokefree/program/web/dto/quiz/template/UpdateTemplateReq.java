@@ -1,4 +1,6 @@
 package com.smokefree.program.web.dto.quiz.template;
 
-public class UpdateTemplateReq {
-}
+public record UpdateTemplateReq(
+    String name,
+    Integer version
+) {}

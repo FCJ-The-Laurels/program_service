@@ -60,7 +60,9 @@ public class EnrollmentServiceImpl implements EnrollmentService {
             // gói trả phí ngay
             p = programCreationService.createPaidProgram(userId, planDays, null);
         }
-
+        p.setPlanTemplateId(template.getId());
+        p.setTemplateCode(template.getCode());
+        p.setTemplateName(template.getName());
         // 4. Lưu Program để có ID
         p = programRepo.save(p);
 
@@ -149,5 +151,38 @@ public class EnrollmentServiceImpl implements EnrollmentService {
             if (code.contains("60")) return 60;
             return null;
         }
+    }
+    @Override
+    @Transactional
+    public EnrollmentRes activatePaid(UUID userId, UUID enrollmentId) {
+        // 1. Tìm chương trình dùng thử của user
+        Program p = programRepo.findByIdAndUserId(enrollmentId, userId)
+                .orElseThrow(() -> new NotFoundException("Enrollment not found: " + enrollmentId));
+
+        // 2. Kiểm tra xem chương trình có phải là trial và đang ACTIVE không
+        if (p.getStatus() != ProgramStatus.ACTIVE) {
+            throw new ConflictException("Enrollment is not ACTIVE. Cannot activate.");
+        }
+        if (p.getTrialEndExpected() == null) {
+            throw new ConflictException("Enrollment is not a trial program. Cannot activate.");
+        }
+
+        // 3. "Nâng cấp" chương trình: bỏ đi ngày hết hạn trial
+        p.setTrialEndExpected(null);
+        // Có thể thêm các logic khác ở đây, ví dụ: cập nhật lại ngày bắt đầu nếu cần
+
+        p = programRepo.save(p);
+
+        // 4. Trả về thông tin enrollment đã được cập nhật
+        return new EnrollmentRes(
+                p.getId(),
+                p.getUserId(),
+                p.getPlanTemplateId(),
+                p.getTemplateCode(),
+                p.getStatus().name(),
+                p.getStartDate() == null ? null : p.getStartDate().atStartOfDay(ZoneOffset.UTC).toInstant(),
+                null,      // endAt
+                null       // trialUntil đã được set về null
+        );
     }
 }
