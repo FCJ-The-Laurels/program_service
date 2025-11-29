@@ -1,14 +1,16 @@
 package com.smokefree.program.domain.service.quiz.impl.quiz;
 
-
 import com.smokefree.program.domain.model.*;
-import com.smokefree.program.domain.repo.QuizChoiceLabelRepository;
-import com.smokefree.program.domain.repo.QuizTemplateQuestionRepository;
 import com.smokefree.program.domain.repo.QuizTemplateRepository;
 import com.smokefree.program.domain.service.quiz.AdminQuizService;
+import com.smokefree.program.web.dto.quiz.admin.ChoiceDto;
+import com.smokefree.program.web.dto.quiz.admin.CreateFullQuizReq;
+import com.smokefree.program.web.dto.quiz.admin.QuestionDto;
+import com.smokefree.program.web.dto.quiz.admin.UpdateFullQuizReq;
 import jakarta.transaction.Transactional;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
+import org.springframework.util.Assert;
 
 import java.time.Instant;
 import java.util.UUID;
@@ -19,35 +21,82 @@ import java.util.UUID;
 public class AdminQuizServiceImpl implements AdminQuizService {
 
     private final QuizTemplateRepository tplRepo;
-    private final QuizTemplateQuestionRepository qRepo;
-    private final QuizChoiceLabelRepository cRepo;
 
     @Override
-    public QuizTemplate createTemplate(String name) {
-        QuizTemplate t = new QuizTemplate();
-        t.setName(name);
-        t.setVersion(1);
-        t.setStatus(QuizTemplateStatus.DRAFT);
-        t.setScope(QuizTemplateScope.SYSTEM);
-        t.setOwnerId(null);
-        t.setCreatedAt(Instant.now());
-        t.setUpdatedAt(Instant.now());
-        return tplRepo.save(t);
+    public QuizTemplate createFullQuiz(CreateFullQuizReq req) {
+        // 1. Tạo đối tượng QuizTemplate cha
+        QuizTemplate template = new QuizTemplate();
+        template.setName(req.name());
+        template.setVersion(req.version() != null ? req.version() : 1);
+        // Các giá trị mặc định khác sẽ được set bởi @PrePersist trong Entity
+
+        // 2. Lặp qua DTO câu hỏi và xây dựng các Entity con
+        for (QuestionDto questionDto : req.questions()) {
+            QuizTemplateQuestion newQuestion = new QuizTemplateQuestion();
+            newQuestion.setId(new QuizTemplateQuestionId(template.getId(), questionDto.orderNo()));
+            newQuestion.setTemplate(template);
+            newQuestion.setQuestionText(questionDto.questionText());
+            newQuestion.setType(questionDto.type());
+            newQuestion.setExplanation(questionDto.explanation());
+
+            // 3. Lặp qua DTO lựa chọn và xây dựng các Entity cháu
+            for (ChoiceDto choiceDto : questionDto.choices()) {
+                QuizChoiceLabel newChoice = new QuizChoiceLabel();
+                newChoice.setId(new QuizChoiceLabelId(template.getId(), questionDto.orderNo(), choiceDto.labelCode()));
+                newChoice.setQuestion(newQuestion);
+                newChoice.setLabelText(choiceDto.labelText());
+                newChoice.setCorrect(choiceDto.isCorrect());
+                newChoice.setWeight(choiceDto.weight());
+                
+                newQuestion.getChoiceLabels().add(newChoice);
+            }
+            template.getQuestions().add(newQuestion);
+        }
+
+        // 4. Lưu đối tượng cha. Do có CascadeType.ALL, tất cả các con và cháu sẽ được lưu theo.
+        return tplRepo.save(template);
     }
 
     @Override
-    public QuizTemplate updateTemplate(UUID templateId, String name, Integer version) {
-        QuizTemplate t = tplRepo.findById(templateId)
-                .orElseThrow(() -> new IllegalArgumentException("Template not found"));
-        
-        if (name != null && !name.isBlank()) {
-            t.setName(name);
+    public void updateFullQuiz(UUID templateId, UpdateFullQuizReq req) {
+        QuizTemplate template = tplRepo.findById(templateId)
+                .orElseThrow(() -> new IllegalArgumentException("Template not found with ID: " + templateId));
+
+        Assert.isTrue(template.getStatus() == QuizTemplateStatus.DRAFT, "Can only update a DRAFT template.");
+
+        if (req.name() != null && !req.name().isBlank()) {
+            template.setName(req.name());
         }
-        if (version != null) {
-            t.setVersion(version);
+        if (req.version() != null) {
+            template.setVersion(req.version());
         }
-        t.setUpdatedAt(Instant.now());
-        return tplRepo.save(t);
+
+        template.getQuestions().clear();
+        tplRepo.flush(); 
+
+        for (QuestionDto questionDto : req.questions()) {
+            QuizTemplateQuestion newQuestion = new QuizTemplateQuestion();
+            newQuestion.setId(new QuizTemplateQuestionId(templateId, questionDto.orderNo()));
+            newQuestion.setTemplate(template);
+            newQuestion.setQuestionText(questionDto.questionText());
+            newQuestion.setType(questionDto.type());
+            newQuestion.setExplanation(questionDto.explanation());
+
+            for (ChoiceDto choiceDto : questionDto.choices()) {
+                QuizChoiceLabel newChoice = new QuizChoiceLabel();
+                newChoice.setId(new QuizChoiceLabelId(templateId, questionDto.orderNo(), choiceDto.labelCode()));
+                newChoice.setQuestion(newQuestion);
+                newChoice.setLabelText(choiceDto.labelText());
+                newChoice.setCorrect(choiceDto.isCorrect());
+                newChoice.setWeight(choiceDto.weight());
+                
+                newQuestion.getChoiceLabels().add(newChoice);
+            }
+            template.getQuestions().add(newQuestion);
+        }
+
+        template.setUpdatedAt(Instant.now());
+        tplRepo.save(template);
     }
 
     @Override
@@ -68,50 +117,5 @@ public class AdminQuizServiceImpl implements AdminQuizService {
         t.setArchivedAt(Instant.now());
         t.setUpdatedAt(Instant.now());
         tplRepo.save(t);
-    }
-
-    @Override
-    public QuizTemplateQuestionId addQuestion(
-            UUID templateId, Integer orderNo, String text, String type, Integer points, String explanation) {
-
-        QuizTemplate template = tplRepo.findById(templateId)
-                .orElseThrow(() -> new IllegalArgumentException("Template not found"));
-
-        QuizTemplateQuestionId id = new QuizTemplateQuestionId(templateId, orderNo);
-
-        QuizTemplateQuestion q = new QuizTemplateQuestion();
-        q.setId(id);
-        q.setTemplate(template);
-        q.setQuestionText(text);
-        q.setType(QuestionType.valueOf(type));   // truyền trực tiếp QuestionType để tránh sai chính tả
-        q.setPoints(points);
-        q.setExplanation(explanation);
-
-        qRepo.save(q);
-        return id;
-    }
-
-    @Override
-    public QuizChoiceLabelId addChoice(
-            UUID templateId, Integer questionNo,
-            String labelCode, String labelText,
-            Boolean correct, Integer weight) {
-
-        // Bảo đảm câu hỏi tồn tại để liên kết ManyToOne
-        QuizTemplateQuestionId qid = new QuizTemplateQuestionId(templateId, questionNo);
-        QuizTemplateQuestion question = qRepo.findById(qid)
-                .orElseThrow(() -> new IllegalArgumentException("Question not found"));
-
-        QuizChoiceLabelId cid = new QuizChoiceLabelId(templateId, questionNo, labelCode);
-
-        QuizChoiceLabel c = new QuizChoiceLabel();
-        c.setId(cid);
-        c.setQuestion(question);         // đồng bộ templateId/questionNo trong PK
-        c.setLabelText(labelText);
-        c.setCorrect(Boolean.TRUE.equals(correct));
-        c.setWeight(weight);
-
-        cRepo.save(c);
-        return cid;
     }
 }
