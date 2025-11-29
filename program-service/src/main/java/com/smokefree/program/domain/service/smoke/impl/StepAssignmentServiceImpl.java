@@ -22,6 +22,7 @@ import java.time.Instant;
 import java.time.LocalDate;
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
+import java.time.temporal.ChronoUnit;
 import java.util.List;
 import java.util.UUID;
 
@@ -56,6 +57,25 @@ public class StepAssignmentServiceImpl implements StepAssignmentService {
         ensureProgramAccess(programId, true);
         log.debug("[StepAssignment] listByProgram: {}", programId);
         return stepAssignmentRepository.findByProgramIdOrderByStepNoAsc(programId);
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public List<StepAssignment> listByProgramAndDate(UUID programId, LocalDate date) {
+        ensureProgramAccess(programId, true);
+        Program program = programRepository.findById(programId)
+                .orElseThrow(() -> new NotFoundException("Program not found: " + programId));
+
+        if (program.getStartDate() == null) {
+            return List.of();
+        }
+
+        long offset = ChronoUnit.DAYS.between(program.getStartDate(), date);
+        int plannedDay = (int) offset + 1; // day 1 = startDate
+        if (plannedDay < 1) {
+            return List.of();
+        }
+        return stepAssignmentRepository.findByProgramIdAndPlannedDay(programId, plannedDay);
     }
 
     /**

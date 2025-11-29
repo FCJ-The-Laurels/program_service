@@ -42,24 +42,36 @@ public class StreakServiceImpl implements StreakService {
     @Transactional
     public StreakView start(UUID programId, OffsetDateTime startedAt) {
         ensureProgramAccess(programId, false);
+        Program program = programRepository.findById(programId)
+                .orElseThrow(() -> new NotFoundException("Program not found: " + programId));
+
         var cur = streakRepo.findFirstByProgramIdAndEndedAtIsNullOrderByStartedAtDesc(programId);
         if (cur.isPresent()) {
             var s = cur.get();
             int days = daysBetween(s.getStartedAt(), OffsetDateTime.now(ZoneOffset.UTC));
-            return new StreakView(s.getId(), days, null, null, s.getStartedAt(), s.getEndedAt());
+            program.setStreakCurrent(days);
+            programRepository.save(program);
+            return new StreakView(s.getId(), days, program.getStreakBest(), daysWithoutSmoke(program), s.getStartedAt(), s.getEndedAt());
         }
         var s = new Streak();
         s.setId(UUID.randomUUID());
         s.setProgramId(programId);
         s.setStartedAt(startedAt != null ? startedAt : OffsetDateTime.now(ZoneOffset.UTC));
         streakRepo.save(s);
-        return new StreakView(s.getId(), 0, null, null, s.getStartedAt(), null);
+
+        program.setStreakCurrent(0);
+        programRepository.save(program);
+
+        return new StreakView(s.getId(), 0, program.getStreakBest(), daysWithoutSmoke(program), s.getStartedAt(), null);
     }
 
     @Override
     @Transactional
     public StreakView breakStreak(UUID programId, OffsetDateTime brokenAt, UUID smokeEventId, String note) {
         ensureProgramAccess(programId, false);
+        Program program = programRepository.findById(programId)
+                .orElseThrow(() -> new NotFoundException("Program not found: " + programId));
+
         var s = streakRepo.findFirstByProgramIdAndEndedAtIsNullOrderByStartedAtDesc(programId)
                 .orElseGet(() -> {
                     var ns = new Streak();
@@ -71,8 +83,9 @@ public class StreakServiceImpl implements StreakService {
 
         var end = brokenAt != null ? brokenAt : OffsetDateTime.now(ZoneOffset.UTC);
         if (s.getEndedAt() == null) {
+            int length = Math.max(daysBetween(s.getStartedAt(), end), 0);
             s.setEndedAt(end);
-            s.setLengthDays(Math.max(daysBetween(s.getStartedAt(), end), 0));
+            s.setLengthDays(length);
             streakRepo.save(s);
         }
 
@@ -86,23 +99,41 @@ public class StreakServiceImpl implements StreakService {
         b.setNote(note);
         breakRepo.save(b);
 
-        return new StreakView(s.getId(), s.getLengthDays() == null ? 0 : s.getLengthDays(), null, null, s.getStartedAt(), s.getEndedAt());
+        program.setStreakCurrent(0);
+        if (s.getLengthDays() != null && s.getLengthDays() > program.getStreakBest()) {
+            program.setStreakBest(s.getLengthDays());
+        }
+        programRepository.save(program);
+
+        return new StreakView(s.getId(), s.getLengthDays() == null ? 0 : s.getLengthDays(), program.getStreakBest(), daysWithoutSmoke(program), s.getStartedAt(), s.getEndedAt());
     }
 
     @Override
     public StreakView current(UUID programId) {
         ensureProgramAccess(programId, true);
+        Program program = programRepository.findById(programId)
+                .orElseThrow(() -> new NotFoundException("Program not found: " + programId));
+
         var cur = streakRepo.findFirstByProgramIdAndEndedAtIsNullOrderByStartedAtDesc(programId);
-        if (cur.isEmpty()) return new StreakView(null, 0, 0, 0, null, null);
+        if (cur.isEmpty()) return new StreakView(null, 0, program.getStreakBest(), daysWithoutSmoke(program), null, null);
         
         var s = cur.get();
         int days = daysBetween(s.getStartedAt(), OffsetDateTime.now(ZoneOffset.UTC));
-        return new StreakView(s.getId(), days, 0, 0, s.getStartedAt(), s.getEndedAt());
+        program.setStreakCurrent(days);
+        if (days > program.getStreakBest()) {
+            program.setStreakBest(days);
+        }
+        programRepository.save(program);
+
+        return new StreakView(s.getId(), days, program.getStreakBest(), daysWithoutSmoke(program), s.getStartedAt(), s.getEndedAt());
     }
 
     @Override
     public List<StreakView> history(UUID programId, int size) {
         ensureProgramAccess(programId, true);
+        Program program = programRepository.findById(programId)
+                .orElseThrow(() -> new NotFoundException("Program not found: " + programId));
+
         return streakRepo.findByProgramIdOrderByStartedAtDesc(programId, PageRequest.of(0, Math.max(size, 1)))
                 .stream()
                 .map(s -> new StreakView(
@@ -110,8 +141,8 @@ public class StreakServiceImpl implements StreakService {
                         s.getEndedAt() == null
                                 ? daysBetween(s.getStartedAt(), OffsetDateTime.now(ZoneOffset.UTC))
                                 : (s.getLengthDays() == null ? 0 : s.getLengthDays()),
-                        null,
-                        null,
+                        program.getStreakBest(),
+                        daysWithoutSmoke(program),
                         s.getStartedAt(),
                         s.getEndedAt()))
                 .toList();
@@ -143,5 +174,17 @@ public class StreakServiceImpl implements StreakService {
         if (isCoach && !allowCoachReadOnly) {
             throw new ForbiddenException("Coach cannot modify streak for program " + programId);
         }
+    }
+
+    private int daysWithoutSmoke(Program program) {
+        try {
+            if (program.getLastSmokeAt() != null) {
+                return (int) Math.max(0, ChronoUnit.DAYS.between(program.getLastSmokeAt().toLocalDate(), java.time.LocalDate.now()));
+            }
+            if (program.getStartDate() != null) {
+                return (int) Math.max(0, ChronoUnit.DAYS.between(program.getStartDate(), java.time.LocalDate.now()));
+            }
+        } catch (Exception ignore) {}
+        return 0;
     }
 }

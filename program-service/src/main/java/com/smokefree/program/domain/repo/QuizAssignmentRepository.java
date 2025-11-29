@@ -14,6 +14,20 @@ public interface QuizAssignmentRepository extends JpaRepository<QuizAssignment, 
 
     boolean existsByTemplateIdAndProgramId(UUID templateId, UUID programId);
 
-    @Query("SELECT qa FROM QuizAssignment qa WHERE qa.programId = :programId AND qa.active = true ORDER BY qa.startOffsetDay ASC")
+    @Query("""
+            SELECT qa FROM QuizAssignment qa
+            WHERE qa.programId = :programId
+              AND qa.templateId = :templateId
+              AND qa.active = true
+            """)
+    java.util.Optional<QuizAssignment> findActiveByProgramAndTemplate(UUID programId, UUID templateId);
+
+    @Query("""
+            SELECT qa FROM QuizAssignment qa
+            WHERE qa.programId = :programId AND qa.active = true
+            ORDER BY COALESCE(qa.startOffsetDay, 0) ASC,
+                     COALESCE(qa.orderNo, 0) ASC,
+                     qa.createdAt ASC
+            """)
     List<QuizAssignment> findActiveSortedByStartOffset(UUID programId);
 }

@@ -6,11 +6,13 @@ import com.smokefree.program.domain.model.StepAssignment;
 import com.smokefree.program.domain.model.StepStatus;
 import com.smokefree.program.web.dto.step.CreateStepAssignmentReq;
 
+import java.time.LocalDate;
 import java.util.List;
 import java.util.UUID;
 
 public interface StepAssignmentService {
     List<StepAssignment> listByProgram(UUID programId);
+    List<StepAssignment> listByProgramAndDate(UUID programId, LocalDate date);
     StepAssignment getOne(UUID programId, UUID id);
     StepAssignment create(UUID programId, CreateStepAssignmentReq req);
     void updateStatus(UUID userId,

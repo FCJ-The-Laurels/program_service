@@ -54,12 +54,8 @@ public class StepController {
         UUID userId = SecurityUtil.requireUserId();
         log.info("[Step] Get TODAY steps for program {} user {}", programId, userId);
 
-        List<StepAssignment> allSteps = service.listByProgram(programId);
-        int todayDayOfYear = LocalDate.now(ZoneOffset.UTC).getDayOfYear();
-
-        return allSteps.stream()
-                .filter(s -> s.getPlannedDay() != null && s.getPlannedDay().equals(todayDayOfYear))
-                .toList();
+        LocalDate todayUtc = LocalDate.now(ZoneOffset.UTC);
+        return service.listByProgramAndDate(programId, todayUtc);
     }
 
     // --- CREATE & MANAGE ---

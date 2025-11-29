@@ -34,6 +34,9 @@ public class QuizAssignment {
     @Column(name = "start_offset_day")
     private Integer startOffsetDay;
 
+    @Column(name = "order_no")
+    private Integer orderNo;
+
     @Column(name = "use_latest_version", nullable = false)
     private boolean useLatestVersion = true;
 

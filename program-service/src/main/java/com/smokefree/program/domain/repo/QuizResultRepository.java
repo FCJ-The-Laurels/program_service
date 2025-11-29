@@ -8,4 +8,6 @@ import java.util.UUID;
 
 public interface QuizResultRepository extends JpaRepository<QuizResult, UUID> {
     Optional<QuizResult> findFirstByProgramIdAndTemplateIdOrderByCreatedAtDesc(UUID programId, UUID templateId);
+
+    boolean existsByProgramIdAndTemplateId(UUID programId, UUID templateId);
 }

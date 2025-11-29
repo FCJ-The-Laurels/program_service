@@ -34,9 +34,6 @@ public class QuizFlowServiceImpl implements QuizFlowService {
     private final QuizResultRepository quizResultRepository;
     private final SeverityRuleService severityRuleService;
 
-    // --- [KEEPING LIST DUE & OPEN ATTEMPT LOGIC AS IS] ---
-    // (Để tiết kiệm không gian và vì nó đã ổn, tôi chỉ sửa saveAnswer và submit)
-
     @Override
     @Transactional(readOnly = true)
     public List<DueItem> listDue(UUID userId) {
@@ -44,55 +41,100 @@ public class QuizFlowServiceImpl implements QuizFlowService {
 
         Program program = programRepository
             .findFirstByUserIdAndStatusAndDeletedAtIsNull(userId, ProgramStatus.ACTIVE)
-            .or(() -> programRepository.findByUserId(userId))
             .orElse(null);
 
         if (program == null) return List.of();
 
-        List<QuizAssignment> assignments = quizAssignmentRepository
-            .findActiveSortedByStartOffset(program.getId());
-        if (assignments == null || assignments.isEmpty()) {
-            assignments = quizAssignmentRepository.findByProgramId(program.getId());
-        }
-
-        List<DueItem> result = new ArrayList<>();
+        List<QuizAssignment> assignments = quizAssignmentRepository.findActiveSortedByStartOffset(program.getId());
+        
+        record DueCandidate(QuizAssignment assignment, DueItem item) {}
+        List<DueCandidate> result = new ArrayList<>();
         Instant now = Instant.now();
 
         for (var assignment : assignments) {
-            Instant dueAt = calculateDueDate(assignment, program);
-            boolean isOverdue = isQuizDue(assignment, program, dueAt, now);
+            boolean isDue = isQuizDue(assignment, program, now);
 
-            if (isOverdue) {
+            if (isDue) {
+                boolean alreadyTaken = quizResultRepository.existsByProgramIdAndTemplateId(program.getId(), assignment.getTemplateId());
+                
+                if (assignment.getScope() == AssignmentScope.ONCE && alreadyTaken) {
+                    continue; 
+                }
+
                 QuizTemplate template = quizTemplateRepository.findById(assignment.getTemplateId()).orElse(null);
                 if (template != null) {
-                    result.add(new DueItem(template.getId(), template.getName(), dueAt, isOverdue));
+                    Instant displayDueDate = calculateDisplayDueDate(assignment, program);
+                    boolean isOverdue = !displayDueDate.isAfter(now);
+                    result.add(new DueCandidate(
+                            assignment,
+                            new DueItem(template.getId(), template.getName(), displayDueDate, isOverdue)
+                    ));
                 }
             }
         }
-        return result;
+
+        Set<UUID> seenTemplates = new HashSet<>();
+
+        return result.stream()
+                .sorted(Comparator
+                        .comparing((DueCandidate c) -> Optional.ofNullable(c.assignment().getStartOffsetDay()).orElse(0))
+                        .thenComparing(c -> Optional.ofNullable(c.assignment().getOrderNo()).orElse(0))
+                        .thenComparing(c -> c.item().dueAt()))
+                .filter(c -> seenTemplates.add(c.assignment().getTemplateId())) // tránh trùng template
+                .map(DueCandidate::item)
+                .toList();
     }
 
-    private Instant calculateDueDate(QuizAssignment assignment, Program program) {
-        if (assignment.getStartOffsetDay() != null && assignment.getStartOffsetDay() > 0) {
+    private boolean isQuizDue(QuizAssignment assignment, Program program, Instant now) {
+        int startOffset = Optional.ofNullable(assignment.getStartOffsetDay()).orElse(0);
+        if (startOffset > 0 && program.getCurrentDay() < startOffset) {
+            return false;
+        }
+
+        int interval = Optional.ofNullable(assignment.getEveryDays()).orElse(0);
+        if (interval > 0) {
+            Instant dueDate = calculateDisplayDueDate(assignment, program);
+            return !dueDate.isAfter(now);
+        }
+
+        // ONCE hoặc không có interval: chỉ cần qua startOffset
+        return true;
+    }
+
+    private Instant calculateDisplayDueDate(QuizAssignment assignment, Program program) {
+        int startOffset = Optional.ofNullable(assignment.getStartOffsetDay()).orElse(0);
+        int intervalDays = Optional.ofNullable(assignment.getEveryDays()).orElse(0);
+
+        // Nếu có lặp lại
+        if (intervalDays > 0) {
+            Instant lastResultDate = quizResultRepository
+                .findFirstByProgramIdAndTemplateIdOrderByCreatedAtDesc(program.getId(), assignment.getTemplateId())
+                .map(QuizResult::getCreatedAt)
+                .orElse(program.getStartDate().atStartOfDay(ZoneOffset.UTC).toInstant());
+
+            int everyDays = intervalDays > 0 ? intervalDays : 7;
+            Instant candidate = lastResultDate.plus(Duration.ofDays(everyDays));
+
+            if (startOffset > 0) {
+                Instant earliest = program.getStartDate()
+                        .plusDays(startOffset - 1)
+                        .atStartOfDay(ZoneOffset.UTC)
+                        .toInstant();
+                return candidate.isBefore(earliest) ? earliest : candidate;
+            }
+            return candidate;
+        }
+
+        // ONCE: due từ ngày offset trong kế hoạch
+        if (startOffset > 0) {
             return program.getStartDate()
-                .plusDays(assignment.getStartOffsetDay())
-                .atStartOfDay(ZoneOffset.UTC)
-                .toInstant();
+                    .plusDays(startOffset - 1)
+                    .atStartOfDay(ZoneOffset.UTC)
+                    .toInstant();
         }
-        Instant lastResult = quizResultRepository
-            .findFirstByProgramIdAndTemplateIdOrderByCreatedAtDesc(program.getId(), assignment.getTemplateId())
-            .map(QuizResult::getCreatedAt)
-            .orElse(program.getStartDate().atStartOfDay(ZoneOffset.UTC).toInstant());
 
-        int everyDays = (assignment.getEveryDays() == null || assignment.getEveryDays() <= 0) ? 5 : assignment.getEveryDays();
-        return lastResult.plus(Duration.ofDays(everyDays));
-    }
-
-    private boolean isQuizDue(QuizAssignment assignment, Program program, Instant dueAt, Instant now) {
-        if (assignment.getStartOffsetDay() != null && assignment.getStartOffsetDay() > 0) {
-            return program.getCurrentDay() >= assignment.getStartOffsetDay();
-        }
-        return !dueAt.isAfter(now);
+        // Fallback
+        return program.getStartDate().atStartOfDay(ZoneOffset.UTC).toInstant();
     }
 
     @Override
@@ -102,17 +144,23 @@ public class QuizFlowServiceImpl implements QuizFlowService {
 
         Program program = programRepository
             .findFirstByUserIdAndStatusAndDeletedAtIsNull(userId, ProgramStatus.ACTIVE)
-            .or(() -> programRepository.findByUserId(userId))
             .orElseThrow(() -> new NotFoundException("No active program for user: " + userId));
         
-        // HARD STOP check (nếu ProgramService chưa chặn, chặn ở đây)
         if (program.getTrialEndExpected() != null && Instant.now().isAfter(program.getTrialEndExpected())) {
              throw new com.smokefree.program.web.error.SubscriptionRequiredException("Trial expired");
         }
 
-        boolean exists = quizAssignmentRepository.existsByTemplateIdAndProgramId(templateId, program.getId());
-        if (!exists) {
-            throw new ForbiddenException("Template not assigned to your program");
+        QuizAssignment assignment = quizAssignmentRepository
+                .findActiveByProgramAndTemplate(program.getId(), templateId)
+                .orElseThrow(() -> new ForbiddenException("Template not assigned to your program"));
+
+        if (assignment.getScope() == AssignmentScope.ONCE &&
+                quizResultRepository.existsByProgramIdAndTemplateId(program.getId(), templateId)) {
+            throw new ConflictException("Quiz already completed");
+        }
+
+        if (!isQuizDue(assignment, program, Instant.now())) {
+            throw new ConflictException("Quiz is not due yet");
         }
 
         quizAttemptRepository.findFirstByProgramIdAndTemplateIdAndStatus(
@@ -151,8 +199,6 @@ public class QuizFlowServiceImpl implements QuizFlowService {
         return new OpenAttemptRes(attempt.getId(), t.getId(), t.getVersion(), questions);
     }
 
-    // --- [CHANGED METHODS] ---
-
     @Override
     @Transactional
     public void saveAnswer(UUID userId, UUID attemptId, AnswerReq req) {
@@ -161,7 +207,6 @@ public class QuizFlowServiceImpl implements QuizFlowService {
         QuizAttempt attempt = quizAttemptRepository.findById(attemptId)
             .orElseThrow(() -> new NotFoundException("Attempt not found"));
 
-        // Validate owner & status
         if (!attempt.getUserId().equals(userId)) {
             throw new ForbiddenException("Not your attempt");
         }
@@ -203,7 +248,7 @@ public class QuizFlowServiceImpl implements QuizFlowService {
         int totalScore = attempt.getAnswers().stream().mapToInt(QuizAnswer::getAnswer).sum();
         SeverityLevel severity = severityRuleService.fromScore(totalScore);
         
-        UUID templateId = attempt.getTemplateId(); // Self-lookup
+        UUID templateId = attempt.getTemplateId();
         QuizTemplate template = quizTemplateRepository.findById(templateId)
             .orElseThrow(() -> new NotFoundException("Template not found (data inconsistent)"));
 
