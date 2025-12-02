@@ -1,231 +1,383 @@
-﻿# Tài liệu API - Program Service
+# Tài Liệu API Program Service (Tiếng Việt)
 
-**Phiên bản:** 2.2.0
-**Ngày cập nhật:** 2023-12-08
-**Người cập nhật:** AI Assistant
-
----
-
-## 1. Tổng quan & Nguyên tắc thiết kế
-
-Tài liệu này mô tả các API do `program-service` cung cấp. Service này chịu trách nhiệm quản lý toàn bộ vòng đời chương trình cai thuốc của người dùng, từ đánh giá ban đầu, thực thi lộ trình, cho đến quản lý dữ liệu và nội dung.
-
-### 1.1. Môi trường
-
--   **Production Base URL:** `https://api.smokefree.app/program`
--   **Development Base URL:** `http://localhost:8080`
-
-### 1.2. Cấu trúc & Tiền tố API (API Structure & Prefixes)
-
-Các API được tổ chức theo chức năng và đối tượng sử dụng thông qua các tiền tố URL:
-
--   `/v1/...`: Các API cốt lõi, ổn định, tuân thủ versioning.
-    -   `/v1/programs`: API liên quan đến chương trình của người dùng.
-    -   `/v1/me/...`: API dành riêng cho người dùng đã xác thực để truy cập dữ liệu của chính họ (ví dụ: quiz).
-    -   `/v1/admin/...`: API dành riêng cho quản trị viên.
--   `/api/...`: Các API phụ trợ hoặc có thể thay đổi thường xuyên hơn.
-    -   `/api/onboarding`: Luồng giới thiệu và đánh giá ban đầu.
-    -   `/api/plan-templates`: API quản lý các lộ trình mẫu.
-    -   `/api/modules`: API quản lý các module nội dung.
-
-### 1.3. Xác thực & Phân quyền (Authentication & Authorization)
-
-Hệ thống áp dụng mô hình **Xác thực Ủy quyền (Delegated Authentication)**. `program-service` tin tưởng vào thông tin do API Gateway cung cấp qua các HTTP Header.
-
-**HTTP Headers:**
-
-| Header          | Bắt buộc | Mô tả                                                                     | Ví dụ                |
-| :-------------- | :------- | :------------------------------------------------------------------------ | :------------------- |
-| `X-User-Id`     | **Có**   | UUID của người dùng đã được xác thực.                                     | `uuid-user-123`      |
-| `X-User-Role`   | **Có**   | Vai trò của người dùng.                                                    | `CUSTOMER`, `ADMIN`  |
-| `X-User-Tier`   | Không    | Gói dịch vụ người dùng đang sử dụng. Dùng để xác định quyền lợi (features). | `BASIC`, `PREMIUM`   |
-
-**Cơ chế phân quyền:**
-
-1.  **Kiểm tra Vai trò (Role-based):** Sử dụng `@PreAuthorize` ở tầng Controller để kiểm tra vai trò (`hasRole('ADMIN')`).
-2.  **Kiểm tra Quyền sở hữu (Ownership-based):** Tầng Service luôn xác minh `userId` để đảm bảo người dùng chỉ có thể thao tác trên dữ liệu của chính mình.
-
-### 1.4. Mã trạng thái HTTP (Common Status Codes)
-
-| Code | Ý nghĩa                  | Mô tả                                                              |
-| :--- | :----------------------- | :----------------------------------------------------------------- |
-| `200`  | OK                       | Yêu cầu thành công.                                                |
-| `201`  | Created                  | Tài nguyên được tạo thành công.                                    |
-| `400`  | Bad Request              | Dữ liệu đầu vào không hợp lệ (sai định dạng, thiếu trường).        |
-| `401`  | Unauthorized             | Thiếu thông tin xác thực (ví dụ: thiếu header `X-User-Id`).        |
-| `402`  | Payment Required         | Gói dùng thử đã hết hạn, yêu cầu nâng cấp.                         |
-| `403`  | Forbidden                | Đã xác thực nhưng không có quyền truy cập tài nguyên.               |
-| `404`  | Not Found                | Không tìm thấy tài nguyên được yêu cầu.                            |
-| `409`  | Conflict                 | Xung đột trạng thái (ví dụ: tạo chương trình khi đã có một chương trình đang hoạt động). |
+**Phiên bản:** 2.0 (Hợp nhất Flow Tạo Program)
+**Cập nhật lần cuối:** 02/12/2025
+**Mã hóa:** UTF-8
 
 ---
 
-## 2. API dành cho Người dùng (User-Facing APIs)
+## 1. Tổng quan
 
-### 2.1. Onboarding - Đánh giá & Đăng ký
+Tài liệu này cung cấp hướng dẫn chi tiết cho Program Service API. Service này chịu trách nhiệm quản lý chương trình của người dùng, nội dung bài học, theo dõi tiến độ và các tính năng liên quan.
 
-#### `POST /api/onboarding/baseline`
-Đánh giá mức độ nghiện ban đầu và gợi ý lộ trình phù hợp.
--   **Phân quyền:** `CUSTOMER`
+### 1.1. Base URL
+
+Tất cả các endpoint API đều tương đối với Base URL của service.
+
+-   **Production:** `https://api.smokefree.app/program`
+-   **Development:** `http://localhost:8080`
+
+### 1.2. Xác thực (Authentication)
+
+Tất cả các yêu cầu (request) phải được xác thực thông qua API Gateway. Các header sau là bắt buộc:
+
+| Header          | Mô tả                                           | Ví dụ                                  |
+| --------------- | ----------------------------------------------- | -------------------------------------- |
+| `Authorization` | Bearer token dùng để xác thực.                  | `Bearer <JWT_TOKEN>`                   |
+| `X-User-Id`     | UUID của người dùng đã đăng nhập.               | `a1b2c3d4-e5f6-7890-1234-567890abcdef` |
+| `X-User-Role`   | Vai trò (Role) của người dùng.                  | `USER`, `COACH`, hoặc `ADMIN`          |
+| `X-User-Tier`   | Hạng thành viên (Tier) của người dùng (Tùy chọn)| `BASIC`, `PREMIUM`, hoặc `VIP`         |
+
+### 1.3. Các mã trạng thái HTTP chung (Common Status Codes)
+
+| Mã    | Trạng thái             | Mô tả                                                                       |
+| ----- | ---------------------- | --------------------------------------------------------------------------- |
+| `200` | OK                     | Yêu cầu thành công.                                                         |
+| `201` | Created                | Tài nguyên đã được tạo thành công.                                          |
+| `400` | Bad Request            | Yêu cầu không hợp lệ (sai JSON, thiếu tham số...).                          |
+| `401` | Unauthorized           | Xác thực thất bại hoặc chưa đăng nhập.                                      |
+| `402` | Payment Required       | Yêu cầu trả phí (ví dụ: hết hạn dùng thử Trial).                            |
+| `403` | Forbidden              | Người dùng không có quyền truy cập tài nguyên này.                          |
+| `404` | Not Found              | Không tìm thấy tài nguyên yêu cầu.                                          |
+| `409` | Conflict               | Xung đột dữ liệu (ví dụ: tạo trùng lặp).                                    |
+
+---
+
+## 2. Quy trình Onboarding & Đăng ký
+
+Xử lý luồng người dùng mới và đăng ký tham gia chương trình.
+
+### `POST /api/onboarding/baseline`
+
+Gửi câu trả lời cho bài đánh giá đầu vào (Baseline Assessment) và nhận gợi ý lộ trình.
+
+-   **Quyền:** `USER`
+-   **Lưu ý Frontend:** Gọi API này sau khi user trả lời xong bộ câu hỏi lấy từ API `GET /baseline/quiz`. Response sẽ trả về `recommendedTemplateId`, hãy dùng ID này để gọi API tạo program.
 -   **Request Body:** `QuizAnswerReq`
--   **Response (200 OK):** `BaselineResultRes` (Chi tiết các lộ trình được gợi ý).
+    ```json
+    {
+      "templateId": "uuid-of-template",
+      "answers": [
+        { "q": 1, "score": 4 }, // Số thứ tự câu hỏi (q) và điểm số (score)
+        { "q": 2, "score": 3 }
+      ]
+    }
+    ```
+-   **Success Response (200 OK):** `BaselineResultRes`
 
-### 2.2. Programs - Quản lý chương trình
+### `GET /api/onboarding/baseline/quiz`
 
-#### `POST /v1/programs`
-Tạo một chương trình trả phí mới.
--   **Phân quyền:** `CUSTOMER`
+Lấy nội dung bộ câu hỏi đánh giá đầu vào.
+
+-   **Quyền:** `USER`
+-   **Success Response (200 OK):** `OpenAttemptRes`
+
+---
+
+## 3. Quản lý Chương trình (Programs)
+
+Các endpoint để quản lý chương trình cai thuốc của người dùng.
+
+### 3.1. Dành cho Người dùng (`/v1/programs`)
+
+### `POST /v1/programs`
+
+Tạo một chương trình mới (Bắt đầu lộ trình). Hỗ trợ cả chế độ Dùng thử (Trial) và Trả phí (Paid).
+
+-   **Quyền:** `USER`
 -   **Request Body:** `CreateProgramReq`
-    | Tên | Kiểu | Bắt buộc | Mô tả |
-    | :--- | :--- | :--- | :--- |
-    | `planDays` | `Integer` | Có | Số ngày của lộ trình (ví dụ: 30, 45, 60). |
--   **Response (201 Created):** `ProgramRes`
+    ```json
+    {
+      "planTemplateId": "uuid-của-plan-đã-chọn", // Bắt buộc (Lấy từ Baseline Result)
+      "trial": true,       // true = Dùng thử (7 ngày), false = Trả phí ngay
+      "coachId": "optional-uuid"
+    }
+    ```
+-   **Success Response (200 OK):** `ProgramRes`
+    ```json
+    {
+      "id": "uuid-của-program-mới",
+      "status": "ACTIVE",
+      "planDays": 30,
+      "startDate": "2025-11-28",
+      "currentDay": 1,
+      "access": {
+        "entState": "ACTIVE",
+        "entExp": "2026-11-28T10:00:00Z", // Ngày hết hạn dùng thử (nếu là trial)
+        "tier": "BASIC"
+      }
+    }
+    ```
 
-#### `GET /v1/programs/active`
-Lấy chương trình đang hoạt động.
--   **Phân quyền:** `CUSTOMER`
--   **Response (200 OK):** `ProgramRes`
--   **Response (404 Not Found):** Nếu không có chương trình nào đang hoạt động.
+### `GET /v1/programs/active`
 
-#### `GET /v1/programs`
-Liệt kê tất cả các chương trình của người dùng.
--   **Phân quyền:** `CUSTOMER`
--   **Response (200 OK):** `List<ProgramRes>`
+Lấy thông tin chương trình đang kích hoạt (Active) của người dùng.
 
-#### `POST /api/programs/{programId}/pause`
-Tạm dừng chương trình đang hoạt động.
--   **Phân quyền:** `CUSTOMER` (Chủ sở hữu)
--   **Response (200 OK):** `ProgramRes` với `status: PAUSED`.
+-   **Quyền:** `USER`
+-   **Success Response (200 OK):** `ProgramRes` (cấu trúc như trên)
+-   **Lưu ý Frontend:** Nếu API trả về lỗi `402 Payment Required`, nghĩa là thời hạn dùng thử (Trial) đã hết. Cần chuyển hướng user sang trang thanh toán/nâng cấp.
 
-#### `POST /api/programs/{programId}/resume`
-Tiếp tục chương trình đã tạm dừng.
--   **Phân quyền:** `CUSTOMER` (Chủ sở hữu)
--   **Response (200 OK):** `ProgramRes` với `status: ACTIVE`.
+### 3.2. Endpoint Quản lý (`/api/programs`)
 
-### 2.3. Program Execution - Thực thi chương trình
+### `GET /api/programs/{id}/progress`
 
-#### `GET /api/programs/{programId}/steps/today`
-Lấy danh sách nhiệm vụ của ngày hôm nay (UTC).
--   **Phân quyền:** `CUSTOMER`, `COACH`
--   **Response (200 OK):** `List<StepAssignment>`
+Lấy chi tiết tiến độ (Dashboard).
 
-#### `PATCH /api/programs/{programId}/steps/{stepId}/status`
-Cập nhật trạng thái một nhiệm vụ.
--   **Phân quyền:** `CUSTOMER`
--   **Request Body:** `{ "status": "COMPLETED" | "SKIPPED" }`
--   **Response (200 OK):** `StepAssignment`
+-   **Quyền:** `USER` (chủ sở hữu)
+-   **Path Parameters:** `id` (UUID của program)
+-   **Success Response (200 OK):** `ProgramProgressRes`
+    ```json
+    {
+      "id": "uuid-of-program",
+      "status": "ACTIVE",
+      "currentDay": 15,
+      "planDays": 30,
+      "percentComplete": 50.0, // Phần trăm hoàn thành
+      "daysRemaining": 15,
+      "stepsCompleted": 5,     // Số bước đã xong
+      "stepsTotal": 10,        // Tổng số bước
+      "streakCurrent": 10,     // Chuỗi ngày cai hiện tại
+      "trialRemainingDays": 5  // Số ngày dùng thử còn lại (null nếu không phải trial)
+    }
+    ```
 
-#### `POST /api/programs/{programId}/smoke-events`
-Ghi lại một sự kiện hút thuốc.
--   **Phân quyền:** `CUSTOMER`
--   **Request Body:** `CreateSmokeEventReq`
--   **Logic:** Sự kiện `SLIP` hoặc `RELAPSE` sẽ ngắt chuỗi ngày không hút thuốc (`streak`).
--   **Response (201 Created):** `SmokeEventRes`
+### `POST /api/programs/{id}/pause`
+### `POST /api/programs/{id}/resume`
+### `POST /api/programs/{id}/end`
 
-#### `GET /api/programs/{programId}/streak`
-Lấy thông tin chuỗi ngày không hút thuốc.
--   **Phân quyền:** `CUSTOMER`, `COACH`
--   **Response (200 OK):** `StreakView`
+Thay đổi trạng thái chương trình (Tạm dừng / Tiếp tục / Kết thúc sớm).
 
-### 2.4. Quizzes - Làm bài đánh giá
+-   **Quyền:** `USER` (chủ sở hữu)
+-   **Success Response (200 OK):** `ProgramRes`
 
-#### `GET /v1/me/quizzes`
-Lấy danh sách các bài quiz đến hạn.
--   **Phân quyền:** `CUSTOMER` (Xác thực qua `X-User-Id`)
--   **Response (200 OK):** `List<DueItem>`
+### `GET /api/programs/{id}/trial-status`
 
-#### `POST /v1/me/quizzes/{templateId}/open`
-Bắt đầu một lượt làm bài quiz.
--   **Phân quyền:** `CUSTOMER`
--   **Response (201 Created):** `OpenAttemptRes` (Chứa câu hỏi và các lựa chọn).
+Kiểm tra trạng thái dùng thử.
 
-#### `POST /v1/me/quizzes/{attemptId}/submit`
-Nộp bài và nhận kết quả.
--   **Phân quyền:** `CUSTOMER`
--   **Response (200 OK):** `SubmitRes` (Chứa điểm số và mức độ đánh giá).
+-   **Quyền:** `USER` (chủ sở hữu)
+-   **Success Response (200 OK):** `TrialStatusRes`
+    ```json
+    {
+      "isTrial": true,
+      "trialStartedAt": "...",
+      "trialEndExpected": "...",
+      "remainingDays": 2,
+      "canUpgradeNow": true // Có thể nâng cấp ngay bây giờ không
+    }
+    ```
 
 ---
 
-## 3. API dành cho Quản trị viên (Admin-Facing APIs)
+## 4. Mẫu Lộ trình & Nội dung (Content)
 
-### 3.1. Program Management - Quản lý chương trình người dùng
+### 4.1. Plan Templates (`/api/plan-templates`)
 
-#### `POST /api/programs/{programId}/upgrade-from-trial`
-Nâng cấp chương trình từ dùng thử sang trả phí.
--   **Phân quyền:** `ADMIN`, `PAYMENT_SERVICE`
--   **Logic:** Xóa các trường `trial...` khỏi `Program`.
--   **Response (200 OK):** `ProgramRes`
+### `GET /api/plan-templates`
 
-#### `PATCH /api/programs/{programId}/current-day`
-Cập nhật ngày hiện tại của chương trình cho người dùng.
--   **Phân quyền:** `ADMIN`
--   **Request Body:** `{ "currentDay": 5 }`
--   **Response (200 OK):** `ProgramRes`
+Danh sách tất cả các mẫu lộ trình có sẵn.
 
-### 3.2. Plan Template Management - Quản lý lộ trình mẫu
+-   **Quyền:** `Authenticated` (Đã đăng nhập)
+-   **Success Response (200 OK):** `List<PlanTemplateSummaryRes>`
 
-#### `GET /api/plan-templates`
-Lấy danh sách tóm tắt các lộ trình mẫu.
--   **Phân quyền:** `isAuthenticated()` (Bất kỳ vai trò nào)
--   **Response (200 OK):** `List<PlanTemplateSummaryRes>`
+### `GET /api/plan-templates/{id}`
 
-#### `GET /api/plan-templates/{id}`
-Lấy chi tiết một lộ trình mẫu, bao gồm các `PlanStep`.
--   **Phân quyền:** `isAuthenticated()`
--   **Response (200 OK):** `PlanTemplateDetailRes`
+Xem chi tiết một mẫu lộ trình.
 
-### 3.3. Content Module Management - Quản lý nội dung
+-   **Quyền:** `Authenticated`
+-   **Success Response (200 OK):** `PlanTemplateDetailRes`
 
-#### `POST /api/modules`
-Tạo một module nội dung mới (bài viết, video, audio).
--   **Phân quyền:** `ADMIN`
+### `GET /api/plan-templates/by-code/{code}/days`
+
+Lấy lịch trình chi tiết theo mã template.
+
+-   **Quyền:** `Authenticated`
+-   **Query Params:** `expand` (boolean - mở rộng nội dung), `lang` (string - ngôn ngữ)
+-   **Success Response (200 OK):** `PlanDaysRes`
+
+### 4.2. Content Modules (`/api/modules`)
+
+### `POST /api/modules` (Admin)
+
+Tạo nội dung mới (Bài viết/Video/Audio...).
+
+-   **Quyền:** `ADMIN`
 -   **Request Body:** `ContentModuleCreateReq`
--   **Response (201 Created):** `ContentModuleRes`
+    ```json
+    {
+      "code": "ARTICLE_001",
+      "type": "ARTICLE",
+      "lang": "vi",
+      "payload": { "title": "...", "content": "..." }
+    }
+    ```
+-   **Success Response (201 Created):** `ContentModuleRes`
 
-#### `PUT /api/modules/{id}`
-Cập nhật một module nội dung.
--   **Phân quyền:** `ADMIN`
--   **Request Body:** `ContentModuleUpdateReq`
--   **Response (200 OK):** `ContentModuleRes`
+### `GET /api/modules` (Search)
 
-### 3.4. Quiz Management - Quản lý Quiz
+Tìm kiếm nội dung.
 
-#### `POST /v1/admin/quizzes`
-Tạo một bộ quiz hoàn chỉnh (template, câu hỏi, lựa chọn).
--   **Phân quyền:** `ADMIN`
--   **Request Body:** `CreateFullQuizReq`
--   **Response (201 Created):** `{ "id": "...", "message": "..." }`
+-   **Quyền:** `ADMIN`
+-   **Query Params:** `q` (từ khóa), `lang`, `page`, `size`
+-   **Success Response:** `Page<ContentModuleRes>`
 
-#### `POST /v1/admin/quizzes/{templateId}/publish`
-Công khai một quiz template từ `DRAFT` sang `PUBLISHED`.
--   **Phân quyền:** `ADMIN`
--   **Response (200 OK):** `{ "message": "Quiz published" }`
+### `GET /api/modules/by-code/{code}`
+
+Lấy nội dung theo mã (Code).
+
+-   **Quyền:** Public/Authenticated
+-   **Success Response:** `ContentModuleRes`
 
 ---
 
-## 4. Ghi chú cho nhà phát triển (Developer Notes)
+## 5. Hoạt động Hằng ngày (Execution)
 
-### 4.1. Luồng xác thực chi tiết
+### 5.1. Steps (`/api/programs/{programId}/steps`)
 
--   **`HeaderUserContextFilter`**: Filter này chạy trên môi trường production. Nó đọc các header `X-User-Id`, `X-User-Role`, `X-User-Tier` và tạo `Authentication` object cho Spring Security.
--   **`DevAutoUserFilter`**: Filter này chỉ chạy với profile `dev`. Nó cho phép giả lập người dùng bằng cách đọc các header đặc biệt (`X-Claims`, `X-User-Roles`) để đơn giản hóa việc kiểm thử API mà không cần API Gateway.
+### `GET /today`
 
-### 4.2. Cấu hình OAuth2/JWT
+Lấy danh sách nhiệm vụ (steps) của ngày hôm nay.
 
--   Hệ thống có thể được cấu hình để hoạt động như một OAuth2 Resource Server. Nếu các thuộc tính `spring.security.oauth2.resourceserver.jwt.*` được cung cấp, Spring Security sẽ tự động kích hoạt cơ chế xác thực bằng JWT Bearer Token. Khi đó, `HeaderUserContextFilter` sẽ được bỏ qua nếu token hợp lệ.
+-   **Quyền:** `USER`
+-   **Success Response (200 OK):** `List<StepAssignment>`
 
-### 4.3. Đối tượng dữ liệu chính (Core DTOs)
+### `PATCH /{id}/status`
 
-#### `ProgramRes`
-Đại diện cho một chương trình của người dùng.
+Cập nhật trạng thái nhiệm vụ (ví dụ: Đã hoàn thành).
 
-| Tên | Kiểu | Mô tả |
-| :--- | :--- | :--- |
-| `id` | `UUID` | ID của chương trình. |
-| `status` | `String` | Trạng thái: `ACTIVE`, `PAUSED`, `COMPLETED`. |
-| `planDays` | `Integer` | Tổng số ngày của lộ trình. |
-| `startDate` | `String` | Ngày bắt đầu (YYYY-MM-DD). |
-| `currentDay` | `Integer` | Ngày hiện tại trong lộ trình. |
-| `entitlements` | `Object` | Các quyền lợi dựa trên gói dịch vụ. |
-| `access` | `Object` | Thông tin về trạng thái truy cập (dùng thử, trả phí). |
-```
+-   **Quyền:** `USER`
+-   **Request Body:** `UpdateStepStatusReq`
+    ```json
+    {
+      "status": "COMPLETED",
+      "note": "Ghi chú tùy chọn (User cảm thấy thế nào...)"
+    }
+    ```
+-   **Success Response (200 OK):** (Empty Body)
+
+### 5.2. Smoke Events (`/api/programs/{programId}/smoke-events`)
+
+### `POST /`
+
+Ghi nhận sự kiện hút thuốc hoặc thèm thuốc.
+
+-   **Quyền:** `USER`
+-   **Request Body:** `CreateSmokeEventReq`
+    ```json
+    {
+      "eventType": "SMOKE", // Loại: SMOKE (Hút) hoặc URGE (Thèm)
+      "kind": "SLIP",       // Kiểu: SLIP (Lỡ hút), LAPSE, RELAPSE...
+      "puffs": 3,           // Số hơi hút (nếu có)
+      "reason": "STRESS",   // Lý do
+      "note": "...",        // Ghi chú thêm
+      "eventAt": "ISO-8601", // Thời gian xảy ra
+      "occurredAt": "ISO-8601"
+    }
+    ```
+-   **Success Response (200 OK):** `SmokeEventRes`
+
+### `GET /history`
+
+Lấy lịch sử hút thuốc.
+
+-   **Query Params:** `size` (số lượng bản ghi)
+-   **Success Response:** `List<SmokeEventRes>`
+
+### 5.3. Streaks (`/api/programs/{programId}/streak`)
+
+### `GET /`
+
+Lấy thông tin chuỗi cai thuốc (Streak) hiện tại.
+
+-   **Success Response (200 OK):** `StreakView`
+    ```json
+    {
+      "streakId": "uuid",
+      "currentStreak": 5,        // Số ngày cai liên tục hiện tại
+      "bestStreak": 10,          // Kỷ lục tốt nhất
+      "daysWithoutSmoke": 5,     // Số ngày không hút
+      "startedAt": "...",        // Thời điểm bắt đầu streak
+      "endedAt": null            // Thời điểm kết thúc (null nếu đang duy trì)
+    }
+    ```
+
+---
+
+## 6. Quiz Engine (Hệ thống Trắc nghiệm)
+
+### 6.1. Admin Quiz (`/v1/admin/quizzes`)
+
+-   `POST /`: Tạo Template Quiz mới.
+-   `POST /{id}/publish`: Xuất bản Template.
+-   `POST /{id}/questions`: Thêm câu hỏi vào Template.
+
+### 6.2. User Quiz (`/v1/me/quizzes`)
+
+### `GET /` (List Due)
+
+Lấy danh sách các bài kiểm tra đang cần làm (Weekly Check-in, Recovery Quiz...).
+
+-   **Success Response:** `Map<String, Object>`
+    ```json
+    {
+      "success": true,
+      "data": [
+        { 
+          "attemptId": null, // null nghĩa là chưa bắt đầu làm
+          "templateId": "...", 
+          "type": "WEEKLY", 
+          "deadline": "..." 
+        }
+      ],
+      "count": 1
+    }
+    ```
+
+### `POST /{templateId}/open`
+
+Bắt đầu làm bài (Mở lượt làm bài - Attempt).
+
+-   **Success Response:** `OpenAttemptRes` (Chứa danh sách câu hỏi và các lựa chọn)
+
+### `PUT /{attemptId}/answer`
+
+Lưu câu trả lời cho từng câu hỏi.
+
+-   **Lưu ý Frontend:** Nên gọi API này ngay sau khi user chọn đáp án để lưu nháp, tránh mất dữ liệu.
+-   **Request Body:** `AnswerReq`
+    ```json
+    { "questionNo": 1, "answer": 2 } // Câu số 1, chọn đáp án có giá trị/index là 2
+    ```
+-   **Success Response:** `{ "success": true, "message": "..." }`
+
+### `POST /{attemptId}/submit`
+
+Nộp bài và chấm điểm.
+
+-   **Success Response:**
+    ```json
+    {
+      "success": true,
+      "data": {
+        "attemptId": "uuid",
+        "totalScore": 10,
+        "severity": "LOW" // Kết quả đánh giá
+      }
+    }
+    ```
+
+---
+
+## 7. Đăng ký (Subscription)
+
+### `GET /api/subscriptions/me`
+
+Kiểm tra trạng thái gói đăng ký hiện tại.
+
+-   **Success Response:** `SubscriptionStatusRes` (Hiện tại là dữ liệu giả lập - Mock)
+
+### `POST /api/subscriptions/upgrade`
+
+Nâng cấp hạng thành viên (Tier).
+
+-   **Request Body:** `{ "targetTier": "PREMIUM" }`
+-   **Success Response:** `SubscriptionStatusRes`

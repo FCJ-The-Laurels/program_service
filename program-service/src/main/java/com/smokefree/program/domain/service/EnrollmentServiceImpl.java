@@ -1,11 +1,9 @@
 // src/main/java/com/smokefree/program/domain/service/EnrollmentServiceImpl.java
 package com.smokefree.program.domain.service;
 
-import com.smokefree.program.domain.model.PlanTemplate;
-import com.smokefree.program.domain.model.Program;
-import com.smokefree.program.domain.model.ProgramStatus;
-import com.smokefree.program.domain.repo.PlanTemplateRepo;
-import com.smokefree.program.domain.repo.ProgramRepository;
+import com.smokefree.program.domain.model.*;
+import com.smokefree.program.domain.repo.*;
+import com.smokefree.program.domain.service.onboarding.BaselineResultService;
 import com.smokefree.program.domain.service.smoke.StepAssignmentService;
 import com.smokefree.program.web.dto.enrollment.EnrollmentRes;
 import com.smokefree.program.web.dto.enrollment.StartEnrollmentReq;
@@ -30,16 +28,22 @@ public class EnrollmentServiceImpl implements EnrollmentService {
     private final PlanTemplateRepo planTemplateRepo;
     private final ProgramCreationService programCreationService;
     private final StepAssignmentService stepAssignmentService;
+    private final BaselineResultService baselineResultService;
+    private final PlanQuizScheduleRepository planQuizScheduleRepository;
+    private final QuizAssignmentRepository quizAssignmentRepository;
+
     @Override
     @Transactional
     public EnrollmentRes startTrialOrPaid(UUID userId, StartEnrollmentReq req) {
-        // 1. Kiểm tra user đã có ACTIVE program hay chưa
+        if (!baselineResultService.hasBaseline(userId)) {
+            throw new ValidationException("Onboarding quiz is required before starting a program");
+        }
+
         programRepo.findFirstByUserIdAndStatusAndDeletedAtIsNull(userId, ProgramStatus.ACTIVE)
                 .ifPresent(p -> {
                     throw new ConflictException("User already has an ACTIVE program");
                 });
 
-        // 2. Lấy plan template từ request
         UUID templateId = req.planTemplateId();
         if (templateId == null) {
             throw new ValidationException("planTemplateId is required");
@@ -51,27 +55,20 @@ public class EnrollmentServiceImpl implements EnrollmentService {
         String planCode = template.getCode();
         int planDays = template.getTotalDays();
 
-        // 3. Tạo Program (trial hoặc paid)
         Program p;
         if (Boolean.TRUE.equals(req.trial())) {
-            // trial 7 ngày
             p = programCreationService.createTrialProgram(userId, planDays, 7, null);
         } else {
-            // gói trả phí ngay
             p = programCreationService.createPaidProgram(userId, planDays, null);
         }
         p.setPlanTemplateId(template.getId());
         p.setTemplateCode(template.getCode());
         p.setTemplateName(template.getName());
-        // 4. Lưu Program để có ID
         p = programRepo.save(p);
 
-        // 5. Clone step từ PlanTemplate sang StepAssignment
-        // 5. Clone step từ PlanTemplate sang StepAssignment
         stepAssignmentService.createForProgramFromTemplate(p, template);
+        assignSystemQuizzes(p);
 
-
-        // 6. Đọc lại thời điểm hết trial từ entity
         Instant trialUntil = p.getTrialEndExpected();
         Instant startAt = p.getStartDate() == null
                 ? null
@@ -84,12 +81,10 @@ public class EnrollmentServiceImpl implements EnrollmentService {
                 planCode,
                 p.getStatus().name(),
                 startAt,
-                null,      // endAt: hiện chưa lưu trong Program
-                trialUntil // trialUntil: chỉ khác null cho chương trình trial
+                null,
+                trialUntil
         );
     }
-
-
 
     @Override
     @Transactional(readOnly = true)
@@ -100,11 +95,11 @@ public class EnrollmentServiceImpl implements EnrollmentService {
         return programs.stream().map(p -> new EnrollmentRes(
                 p.getId(),
                 p.getUserId(),
-                null, // Program chưa lưu planTemplateId
-                null, // Không suy ra được planCode từ DB
+                null,
+                null,
                 p.getStatus().name(),
                 p.getStartDate() == null ? null : p.getStartDate().atStartOfDay(ZoneOffset.UTC).toInstant(),
-                null, // Program chưa có endAt
+                null,
                 p.getTrialEndExpected()
         )).toList();
     }
@@ -124,42 +119,14 @@ public class EnrollmentServiceImpl implements EnrollmentService {
 
         p.setStatus(ProgramStatus.COMPLETED);
         programRepo.save(p);
-
-        // Nếu muốn lưu thời điểm hoàn tất, hãy thêm cột endAt (Instant) vào Program + Flyway.
     }
 
-    // ----------------- helpers -----------------
-
-    private static String safeGetCode(Object template) {
-        try { return (String) template.getClass().getMethod("getCode").invoke(template); }
-        catch (Exception ignore) {
-            try { return (String) template.getClass().getMethod("getName").invoke(template); }
-            catch (Exception e) { return null; }
-        }
-    }
-
-    private static Integer safeGetDays(Object template) {
-        try {
-            Object v = template.getClass().getMethod("getDays").invoke(template);
-            return (v instanceof Integer i) ? i : null;
-        } catch (Exception ignore) {
-            // fallback: đoán từ code "xxx_30D|45D|60D"
-            String code = safeGetCode(template);
-            if (code == null) return null;
-            if (code.contains("30")) return 30;
-            if (code.contains("45")) return 45;
-            if (code.contains("60")) return 60;
-            return null;
-        }
-    }
     @Override
     @Transactional
     public EnrollmentRes activatePaid(UUID userId, UUID enrollmentId) {
-        // 1. Tìm chương trình dùng thử của user
         Program p = programRepo.findByIdAndUserId(enrollmentId, userId)
                 .orElseThrow(() -> new NotFoundException("Enrollment not found: " + enrollmentId));
 
-        // 2. Kiểm tra xem chương trình có phải là trial và đang ACTIVE không
         if (p.getStatus() != ProgramStatus.ACTIVE) {
             throw new ConflictException("Enrollment is not ACTIVE. Cannot activate.");
         }
@@ -167,13 +134,9 @@ public class EnrollmentServiceImpl implements EnrollmentService {
             throw new ConflictException("Enrollment is not a trial program. Cannot activate.");
         }
 
-        // 3. "Nâng cấp" chương trình: bỏ đi ngày hết hạn trial
         p.setTrialEndExpected(null);
-        // Có thể thêm các logic khác ở đây, ví dụ: cập nhật lại ngày bắt đầu nếu cần
-
         p = programRepo.save(p);
 
-        // 4. Trả về thông tin enrollment đã được cập nhật
         return new EnrollmentRes(
                 p.getId(),
                 p.getUserId(),
@@ -181,8 +144,38 @@ public class EnrollmentServiceImpl implements EnrollmentService {
                 p.getTemplateCode(),
                 p.getStatus().name(),
                 p.getStartDate() == null ? null : p.getStartDate().atStartOfDay(ZoneOffset.UTC).toInstant(),
-                null,      // endAt
-                null       // trialUntil đã được set về null
+                null,
+                null
         );
+    }
+
+    private void assignSystemQuizzes(Program program) {
+        UUID planTemplateId = program.getPlanTemplateId();
+        if (planTemplateId == null) {
+            return;
+        }
+
+        List<PlanQuizSchedule> schedules = planQuizScheduleRepository.findByPlanTemplateIdOrderByStartOffsetDayAscOrderNoAsc(planTemplateId);
+        for (PlanQuizSchedule schedule : schedules) {
+            if (!quizAssignmentRepository.existsByTemplateIdAndProgramId(schedule.getQuizTemplateId(), program.getId())) {
+                QuizAssignment assignment = new QuizAssignment();
+                assignment.setId(UUID.randomUUID());
+                assignment.setProgramId(program.getId());
+                assignment.setTemplateId(schedule.getQuizTemplateId());
+                assignment.setStartOffsetDay(schedule.getStartOffsetDay());
+                assignment.setOrderNo(schedule.getOrderNo());
+
+                int everyDays = schedule.getEveryDays() == null ? 0 : schedule.getEveryDays();
+                boolean isRecurring = everyDays > 0;
+
+                assignment.setScope(isRecurring ? AssignmentScope.WEEK : AssignmentScope.ONCE);
+                assignment.setEveryDays(isRecurring ? everyDays : 0);
+                assignment.setOrigin(isRecurring ? QuizAssignmentOrigin.AUTO_WEEKLY : QuizAssignmentOrigin.SYSTEM_ONBOARDING);
+                assignment.setActive(true);
+                assignment.setCreatedAt(Instant.now());
+
+                quizAssignmentRepository.save(assignment);
+            }
+        }
     }
 }

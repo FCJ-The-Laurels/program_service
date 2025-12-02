@@ -50,6 +50,10 @@ public class MeServiceImpl implements MeService {
         StreakInfoRes streakInfo = null;
 
         if (programEntity != null) {
+            if (programEntity.getTrialEndExpected() != null &&
+                    Instant.now().isAfter(programEntity.getTrialEndExpected())) {
+                throw new com.smokefree.program.web.error.SubscriptionRequiredException("Trial expired");
+            }
             log.info("[Dashboard] Found active program: {}", programEntity.getId());
 
             // 3. Map ActiveProgramRes

@@ -13,6 +13,8 @@ public interface StepAssignmentRepository extends JpaRepository<StepAssignment, 
     // Sắp xếp theo stepNo thay cho orderIndex
     List<StepAssignment> findByProgramIdOrderByStepNoAsc(UUID programId);
 
+    org.springframework.data.domain.Page<StepAssignment> findByProgramId(UUID programId, org.springframework.data.domain.Pageable pageable);
+
     Optional<StepAssignment> findByIdAndProgramId(UUID id, UUID programId);
 
     // Lấy stepNo lớn nhất trong chương trình (nếu cần auto-number)

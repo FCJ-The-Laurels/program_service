@@ -1,7 +1,7 @@
 # Program Service API Documentation
 
-**Version:** 2.1.0
-**Last Updated:** 2025-11-28
+**Version:** 1.1.0
+**Last Updated:** 2025-12-02
 **Charset:** UTF-8
 
 ---
@@ -26,6 +26,7 @@ All requests must be authenticated via the API Gateway. The following headers ar
 | `Authorization` | Bearer token for authentication.                | `Bearer <JWT_TOKEN>`                   |
 | `X-User-Id`     | The UUID of the authenticated user.             | `a1b2c3d4-e5f6-7890-1234-567890abcdef` |
 | `X-User-Role`   | The role of the authenticated user.             | `USER`, `COACH`, or `ADMIN`            |
+| `X-User-Tier`   | The tier of the authenticated user (Optional).  | `BASIC`, `PREMIUM`, or `VIP`           |
 
 ### 1.3. User Roles
 
@@ -46,8 +47,7 @@ All requests must be authenticated via the API Gateway. The following headers ar
 | `402` | Payment Required       | The requested action requires a subscription (e.g., trial has expired).     |
 | `403` | Forbidden              | The authenticated user does not have permission to access this resource.    |
 | `404` | Not Found              | The requested resource could not be found.                                  |
-| `409` | Conflict               | The request could not be completed due to a conflict with the current state of the resource (e.g., creating a duplicate item). |
-| `501` | Not Implemented        | The server does not support the functionality required to fulfill the request. |
+| `409` | Conflict               | The request could not be completed due to a conflict (e.g., duplicate item).|
 
 ---
 
@@ -63,10 +63,10 @@ Submits the user's baseline assessment answers and receives a program recommenda
 -   **Request Body:** `QuizAnswerReq`
     ```json
     {
+      "templateId": "uuid-of-template",
       "answers": [
-        { "q": 1, "score": 4 }, // Question number and score (1-5)
+        { "q": 1, "score": 4 }, // Question number and score
         { "q": 2, "score": 3 }
-        // ... up to 10 answers
       ]
     }
     ```
@@ -74,54 +74,42 @@ Submits the user's baseline assessment answers and receives a program recommenda
     ```json
     {
       "totalScore": 35,
-      "severity": "HIGH", // Calculated severity level (LOW, MODERATE, HIGH)
+      "severity": "HIGH", // LOW, MODERATE, HIGH
       "recommendedTemplateId": "uuid-of-high-severity-plan",
       "recommendedTemplateCode": "PLAN_HIGH_30D",
-      "options": [ // List of available plans, with one marked as recommended
+      "options": [ 
         {
           "id": "uuid-of-low-severity-plan",
           "code": "PLAN_LOW_30D",
           "name": "30-Day Light Program",
           "totalDays": 30,
           "recommended": false
-        },
-        {
-          "id": "uuid-of-high-severity-plan",
-          "code": "PLAN_HIGH_30D",
-          "name": "30-Day Intensive Program",
-          "totalDays": 30,
-          "recommended": true
         }
       ]
     }
     ```
 
-### `POST /v1/programs/{planTemplateId}/join`
+### `GET /api/onboarding/baseline/quiz`
 
-Enrolls a user into a new program based on a selected plan template.
+Retrieves the questions for the onboarding assessment.
 
 -   **Permissions:** `USER`
--   **Path Parameters:**
-    | Parameter         | Type   | Description                         |
-    | ----------------- | ------ | ----------------------------------- |
-    | `planTemplateId`  | `UUID` | The ID of the `PlanTemplate` to join. |
--   **Request Body (Optional):**
+-   **Success Response (200 OK):** `OpenAttemptRes`
     ```json
     {
-      "trial": true // Defaults to true if body is omitted. Set to false for an immediate paid program.
-    }
-    ```
--   **Success Response (200 OK):** `EnrollmentRes`
-    ```json
-    {
-      "id": "uuid-of-new-program",
-      "userId": "uuid-of-user",
-      "planTemplateId": "uuid-of-plan-template",
-      "planCode": "PLAN_HIGH_30D",
-      "status": "ACTIVE",
-      "startAt": "2025-11-28T10:00:00Z",
-      "endAt": null, // Not currently implemented
-      "trialUntil": "2025-12-05T10:00:00Z" // Null if not a trial program
+      "attemptId": null, // Null for baseline preview
+      "templateId": "uuid-of-template",
+      "version": 1,
+      "questions": [
+        {
+          "questionNo": 1,
+          "questionText": "How soon...",
+          "choices": {
+            "A": "Within 5 min",
+            "B": "6-30 min"
+          }
+        }
+      ]
     }
     ```
 
@@ -135,20 +123,21 @@ Endpoints for managing user programs.
 
 ### `POST /v1/programs`
 
-Creates a new program for the user. Clones steps from a plan template and auto-assigns system quizzes.
+Creates a new program for the user.
 
 -   **Permissions:** `USER`
 -   **Request Body:** `CreateProgramReq`
     ```json
     {
-      "planDays": 30 // Specifies the desired duration of the program
+      "planDays": 30,
+      "coachId": "optional-uuid"
     }
     ```
 -   **Success Response (200 OK):** `ProgramRes`
     ```json
     {
       "id": "uuid-of-new-program",
-      "status": "ACTIVE",
+      "status": "ACTIVE", // ACTIVE, PAUSED, COMPLETED, CANCELLED
       "planDays": 30,
       "startDate": "2025-11-28",
       "currentDay": 1,
@@ -174,24 +163,14 @@ Retrieves the user's currently active program.
 -   **Success Response (200 OK):** `ProgramRes` (same structure as above)
 -   **Error Response:** `402 Payment Required` if the user's trial has expired.
 
-### `GET /v1/programs`
-
-Lists all programs belonging to the user.
-
--   **Permissions:** `USER`
--   **Success Response (200 OK):** `List<ProgramRes>`
-
 ### 3.2. Management Endpoints (`/api/programs`)
 
 ### `GET /api/programs/{id}/progress`
 
-Retrieves the progress details for a specific program.
+Retrieves detailed progress metrics.
 
--   **Permissions:** `USER` (owner), `COACH`, `ADMIN`
--   **Path Parameters:**
-    | Parameter | Type   | Description                |
-    | --------- | ------ | -------------------------- |
-    | `id`      | `UUID` | The ID of the program.     |
+-   **Permissions:** `USER` (owner)
+-   **Path Parameters:** `id` (UUID)
 -   **Success Response (200 OK):** `ProgramProgressRes`
     ```json
     {
@@ -201,351 +180,250 @@ Retrieves the progress details for a specific program.
       "planDays": 30,
       "percentComplete": 50.0,
       "daysRemaining": 15,
-      "stepsCompleted": 0, // Note: Placeholder, not yet implemented
-      "stepsTotal": 0,     // Note: Placeholder, not yet implemented
+      "stepsCompleted": 5,
+      "stepsTotal": 10,
       "streakCurrent": 10,
-      "trialRemainingDays": 5 // Null if not a trial
+      "trialRemainingDays": 5 // Null if not trial
     }
     ```
 
+### `POST /api/programs/{id}/pause`
+### `POST /api/programs/{id}/resume`
+### `POST /api/programs/{id}/end`
+
+Changes program status.
+
+-   **Permissions:** `USER` (owner)
+-   **Success Response (200 OK):** `ProgramRes`
+
 ### `GET /api/programs/{id}/trial-status`
 
-Checks the trial status of a program.
+Checks if the program is in trial period.
 
--   **Permissions:** `USER` (owner), `COACH`, `ADMIN`
--   **Path Parameters:**
-    | Parameter | Type   | Description                |
-    | --------- | ------ | -------------------------- |
-    | `id`      | `UUID` | The ID of the program.     |
+-   **Permissions:** `USER` (owner)
 -   **Success Response (200 OK):** `TrialStatusRes`
     ```json
     {
       "isTrial": true,
-      "trialStartedAt": "2025-11-20T10:00:00Z",
-      "trialEndExpected": "2025-11-27T10:00:00Z",
-      "remainingDays": 7,
+      "trialStartedAt": "...",
+      "trialEndExpected": "...",
+      "remainingDays": 2,
       "canUpgradeNow": true
     }
     ```
 
-### `POST /api/programs/{id}/end`
-### `POST /api/programs/{id}/pause`
-### `POST /api/programs/{id}/resume`
-
-Changes the status of a program.
-
--   **Permissions:** `USER` (owner), `ADMIN`
--   **Path Parameters:**
-    | Parameter | Type   | Description                |
-    | --------- | ------ | -------------------------- |
-    | `id`      | `UUID` | The ID of the program.     |
--   **Success Response (200 OK):** `ProgramRes`
-
-### `POST /api/programs/{id}/upgrade-from-trial`
-
-Upgrades a program from trial to paid. Intended to be called by the Payment Service.
-
--   **Permissions:** `ADMIN`, `PAYMENT_SERVICE`
--   **Path Parameters:**
-    | Parameter | Type   | Description                |
-    | --------- | ------ | -------------------------- |
-    | `id`      | `UUID` | The ID of the program.     |
--   **Success Response (200 OK):** `ProgramRes`
-
-### `POST /api/programs/{id}/extend-trial`
-
-Extends the trial period for a program.
-
--   **Permissions:** `ADMIN`
--   **Path Parameters:**
-    | Parameter | Type   | Description                |
-    | --------- | ------ | -------------------------- |
-    | `id`      | `UUID` | The ID of the program.     |
--   **Request Body:** `ExtendTrialReq`
-    ```json
-    {
-      "additionalDays": 7
-    }
-    ```
--   **Success Response (200 OK):** `TrialStatusRes`
-
-### `PATCH /api/programs/{id}/current-day`
-
-Manually updates the current day of a program.
-
--   **Permissions:** `ADMIN`
--   **Path Parameters:**
-    | Parameter | Type   | Description                |
-    | --------- | ------ | -------------------------- |
-    | `id`      | `UUID` | The ID of the program.     |
--   **Request Body:** `UpdateCurrentDayReq`
-    ```json
-    {
-      "currentDay": 10
-    }
-    ```
--   **Success Response (200 OK):** `ProgramRes`
-
 ---
 
-## 4. Content & Plan Templates
-
-Endpoints for managing content modules and plan templates.
+## 4. Plan Templates & Content
 
 ### 4.1. Plan Templates (`/api/plan-templates`)
 
 ### `GET /api/plan-templates`
 
-Lists all available plan templates.
+Lists all plan templates.
 
--   **Permissions:** `ADMIN`, `COACH`, `USER`
+-   **Permissions:** `Authenticated`
 -   **Success Response (200 OK):** `List<PlanTemplateSummaryRes>`
-    ```json
-    [
-      {
-        "id": "uuid-of-plan",
-        "code": "PLAN_LOW_30D",
-        "name": "30-Day Light Program",
-        "description": "A gentle start to your smoke-free journey.",
-        "totalDays": 30
-      }
-    ]
-    ```
 
 ### `GET /api/plan-templates/{id}`
 
-Retrieves the full details of a single plan template, including its steps.
+Gets details of a plan template.
 
--   **Permissions:** `ADMIN`, `COACH`, `USER`
--   **Path Parameters:**
-    | Parameter | Type   | Description                |
-    | --------- | ------ | -------------------------- |
-    | `id`      | `UUID` | The ID of the plan template. |
+-   **Permissions:** `Authenticated`
 -   **Success Response (200 OK):** `PlanTemplateDetailRes`
-    ```json
-    {
-      "id": "uuid-of-plan",
-      "code": "PLAN_LOW_30D",
-      // ...other fields
-      "steps": [
-        {
-          "stepNo": 1,
-          "title": "Welcome!",
-          "details": "Introduction to the program.",
-          "dayOffset": 1,
-          "type": "ARTICLE"
-        }
-      ]
-    }
-    ```
 
-### `GET /api/plan-templates/{id}/days`
 ### `GET /api/plan-templates/by-code/{code}/days`
 
-Retrieves the daily schedule for a plan template.
+Gets the daily schedule for a template code.
 
--   **Permissions:** `ADMIN`, `COACH`, `USER`
--   **Query Parameters:**
-    | Parameter | Type      | Default | Description                                            |
-    | --------- | --------- | ------- | ------------------------------------------------------ |
-    | `expand`  | `boolean` | `false` | If `true`, includes the full payload of content modules. |
-    | `lang`    | `string`  | `vi`    | The desired language for the content.                  |
+-   **Permissions:** `Authenticated`
+-   **Query Params:** `expand` (boolean), `lang` (string)
 -   **Success Response (200 OK):** `PlanDaysRes`
-
-### `GET /api/plan-templates/recommendation`
-
-Recommends a plan template based on a severity score.
-
--   **Permissions:** `ADMIN`, `COACH`, `USER`
--   **Query Parameters:**
-    | Parameter  | Type     | Description                               |
-    | ---------- | -------- | ----------------------------------------- |
-    | `severity` | `string` | `LOW`, `MODERATE`, `HIGH`, or a numeric score. |
--   **Success Response (200 OK):** `PlanRecommendationRes`
 
 ### 4.2. Content Modules (`/api/modules`)
 
-### `POST /api/modules`
+### `POST /api/modules` (Admin)
 
-Creates a new content module.
+Creates content (Article/Video/etc).
 
 -   **Permissions:** `ADMIN`
 -   **Request Body:** `ContentModuleCreateReq`
+    ```json
+    {
+      "code": "ARTICLE_001",
+      "type": "ARTICLE",
+      "lang": "vi",
+      "payload": { "title": "...", "content": "..." }
+    }
+    ```
 -   **Success Response (201 Created):** `ContentModuleRes`
+    ```json
+    {
+      "id": "uuid",
+      "code": "ARTICLE_001",
+      "type": "ARTICLE",
+      "lang": "vi",
+      "version": 1,
+      "payload": { ... },
+      "updatedAt": "...",
+      "etag": "..."
+    }
+    ```
 
-### `PUT /api/modules/{id}`
-
-Updates an existing content module.
-
--   **Permissions:** `ADMIN`
--   **Path Parameters:**
-    | Parameter | Type   | Description                   |
-    | --------- | ------ | ----------------------------- |
-    | `id`      | `UUID` | The ID of the content module. |
--   **Request Body:** `ContentModuleUpdateReq`
--   **Success Response (200 OK):** `ContentModuleRes`
-
-### `DELETE /api/modules/{id}`
-
-Deletes a content module.
+### `GET /api/modules` (Search)
 
 -   **Permissions:** `ADMIN`
--   **Path Parameters:**
-    | Parameter | Type   | Description                   |
-    | --------- | ------ | ----------------------------- |
-    | `id`      | `UUID` | The ID of the content module. |
--   **Success Response (204 No Content):**
+-   **Query Params:** `q`, `lang`, `page`, `size`
+-   **Success Response:** `Page<ContentModuleRes>`
 
-### `GET /api/modules`
-
-Searches for content modules.
-
--   **Permissions:** `ADMIN`
--   **Query Parameters:**
-    | Parameter | Type      | Default | Description                               |
-    | --------- | --------- | ------- | ----------------------------------------- |
-    | `q`       | `string`  | `null`  | Search query string.                      |
-    | `lang`    | `string`  | `null`  | Filter by language.                       |
-    | `page`    | `integer` | `0`     | The page number to retrieve.              |
-    | `size`    | `integer` | `20`    | The number of items per page.             |
--   **Success Response (200 OK):** `Page<ContentModuleRes>`
-
-### `GET /api/modules/{id}`
 ### `GET /api/modules/by-code/{code}`
 
-Retrieves the latest version of a content module by its ID or code.
-
--   **Permissions:** `ADMIN`, `COACH` (read), Public lookup by code.
--   **Query Parameters:**
-    | Parameter | Type     | Default | Description           |
-    | --------- | -------- | ------- | --------------------- |
-    | `lang`    | `string` | `null`  | Filter by language.   |
--   **Success Response (200 OK):** `ContentModuleRes`
-
-### `GET /api/modules/by-code/{code}/versions`
-
-Lists all versions of a content module.
-
--   **Permissions:** `ADMIN`
--   **Success Response (200 OK):** `List<ContentModuleRes>`
+-   **Permissions:** Public/Authenticated
+-   **Success Response:** `ContentModuleRes`
 
 ---
 
-## 5. Program Execution
-
-Endpoints for interacting with a running program.
+## 5. Daily Execution
 
 ### 5.1. Steps (`/api/programs/{programId}/steps`)
 
-Manages the daily tasks or "steps" within a program.
+### `GET /today`
 
--   **Permissions:** `USER`/`ADMIN` (write), `COACH` (read-only)
--   **Path Parameters:**
-    | Parameter   | Type   | Description            |
-    | ----------- | ------ | ---------------------- |
-    | `programId` | `UUID` | The ID of the program. |
+Gets steps for the current day.
 
--   **`GET /`**: Lists all step assignments for the program.
--   **`GET /{id}`**: Retrieves a single step assignment.
--   **`GET /today`**: Retrieves steps scheduled for the current day.
--   **`POST /`**: Creates a new step assignment. (Body: `CreateStepAssignmentReq`)
--   **`DELETE /{id}`**: Deletes a step assignment.
--   **`PATCH /{id}/status`**: Updates the status of a step. (Body: `UpdateStepStatusReq {status, note}`)
--   **`POST /{id}/skip`**: Skips a step (sets status to `SKIPPED`).
--   **`PATCH /{id}/reschedule`**: Reschedules a step. (Body: `RescheduleStepReq {newScheduledAt}`)
+-   **Permissions:** `USER`
+-   **Success Response (200 OK):** `List<StepAssignment>`
+
+### `PATCH /{id}/status`
+
+Updates step status (e.g., COMPLETED).
+
+-   **Permissions:** `USER`
+-   **Request Body:** `UpdateStepStatusReq`
+    ```json
+    {
+      "status": "COMPLETED",
+      "note": "Optional note"
+    }
+    ```
+-   **Success Response (200 OK):** (Empty Body)
 
 ### 5.2. Smoke Events (`/api/programs/{programId}/smoke-events`)
 
-Logs smoking incidents.
+### `POST /`
 
--   **Permissions:** `USER`/`ADMIN` (write), `COACH` (read-only)
--   **Path Parameters:**
-    | Parameter   | Type   | Description            |
-    | ----------- | ------ | ---------------------- |
-    | `programId` | `UUID` | The ID of the program. |
+Logs a smoke event.
 
--   **`POST /`**: Creates a new smoke event. (Body: `CreateSmokeEventReq`)
--   **`GET /history`**: Retrieves a list of recent smoke events. (Query: `?size=`)
--   **`GET /stats`**: Retrieves statistics on smoke events. (Query: `?period=DAY|WEEK|MONTH`)
-    -   **Note:** The `trend[]` field in the response is currently a placeholder and will be empty.
+-   **Permissions:** `USER`
+-   **Request Body:** `CreateSmokeEventReq`
+    ```json
+    {
+      "eventType": "SMOKE", // SMOKE, URGE
+      "kind": "SLIP",       // SLIP, LAPSE, RELAPSE, STRONG...
+      "puffs": 3,
+      "reason": "STRESS",
+      "note": "...",
+      "eventAt": "ISO-8601",
+      "occurredAt": "ISO-8601"
+    }
+    ```
+-   **Success Response (200 OK):** `SmokeEventRes`
+
+### `GET /history`
+
+-   **Query Params:** `size` (int)
+-   **Success Response:** `List<SmokeEventRes>`
 
 ### 5.3. Streaks (`/api/programs/{programId}/streak`)
 
-Manages smoke-free streaks.
+### `GET /`
 
--   **Permissions:** `USER`/`ADMIN` (write), `COACH` (read-only)
--   **Path Parameters:**
-    | Parameter   | Type   | Description            |
-    | ----------- | ------ | ---------------------- |
-    | `programId` | `UUID` | The ID of the program. |
+Gets current streak info.
 
--   **`GET /`**: Retrieves the current streak.
--   **`POST /start`**: Starts a new streak (or returns the existing open one).
--   **`POST /break`**: Breaks the current streak. (Body: `BreakStreakReq`)
--   **`GET /history`**: Retrieves a list of past streaks. (Query: `?size=`)
--   **`GET /breaks`**: Retrieves a list of all streak breaks. (Query: `?size=`)
-
----
-
-## 6. Quizzes
-
-Endpoints for creating, managing, and taking quizzes.
-
-### 6.1. Quiz Administration (`/v1/admin/quizzes`)
-
--   **Permissions:** `ADMIN`
-
--   **`POST /`**: Creates a new quiz template. (Body: `CreateTemplateReq`)
--   **`PUT /{id}`**: Updates a quiz template's metadata. (Body: `UpdateTemplateReq`)
--   **`PUT /{id}/archive`**: Archives a quiz template.
--   **`POST /{id}/publish`**: Publishes a quiz template, making it available.
--   **`POST /{id}/questions`**: Adds a question to a quiz template. (Body: `AddQuestionReq`)
--   **`POST /{id}/questions/{qNo}/choices`**: Adds a choice to a question. (Body: `AddChoiceReq`)
-
-### 6.2. User Quiz Flow (`/v1/me/quizzes`)
-
--   **Permissions:** `USER` (owner)
-
--   **`GET /`**: Lists all quizzes that are currently due for the user.
--   **`POST /{templateId}/open`**: Starts a new attempt for a quiz. Returns the questions and choices.
--   **`PUT /{attemptId}/answer`**: Saves the user's answer for a specific question. (Body: `AnswerReq`)
--   **`POST /{attemptId}/submit`**: Submits the quiz for scoring. The `severity` in the response is calculated via `SeverityRuleService`.
-
-### 6.3. Placeholder Endpoints
-
-The following endpoints are planned but not yet implemented. They will return `501 Not Implemented`.
-
--   `/me/quiz/{templateId}/attempts`
--   `/attempts/{attemptId}`
--   `/retry`
+-   **Success Response (200 OK):** `StreakView`
+    ```json
+    {
+      "streakId": "uuid",
+      "currentStreak": 5,        // Days
+      "bestStreak": 10,
+      "daysWithoutSmoke": 5,
+      "startedAt": "...",
+      "endedAt": null
+    }
+    ```
 
 ---
 
-## 7. Dashboard & Subscription
+## 6. Quiz Engine
 
-Endpoints for user-specific overviews and subscription management.
+### 6.1. Admin Quiz (`/v1/admin/quizzes`)
 
-### `GET /api/me`
+-   `POST /`: Create Template
+-   `POST /{id}/publish`: Publish Template
+-   `POST /{id}/questions`: Add Question
 
-Retrieves a consolidated dashboard view for the current user.
+### 6.2. User Quiz (`/v1/me/quizzes`)
 
--   **Permissions:** `USER`
--   **Success Response (200 OK):** `DashboardRes`
-    -   **Note:** The `subscription` object is currently mocked to return a `BASIC` tier.
+### `GET /` (List Due)
+
+Lists quizzes assigned to the user (Weekly, Assessment, Recovery).
+
+-   **Success Response:** `Map<String, Object>`
+    ```json
+    {
+      "success": true,
+      "data": [
+        { "attemptId": null, "templateId": "...", "type": "WEEKLY", "deadline": "..." }
+      ],
+      "count": 1
+    }
+    ```
+
+### `POST /{templateId}/open`
+
+Starts a quiz attempt.
+
+-   **Success Response:** `OpenAttemptRes` (Contains questions)
+
+### `PUT /{attemptId}/answer`
+
+Saves an answer.
+
+-   **Request Body:** `AnswerReq`
+    ```json
+    { "questionNo": 1, "answer": 2 }
+    ```
+-   **Success Response:** `{ "success": true, "message": "..." }`
+
+### `POST /{attemptId}/submit`
+
+Submits and scores the quiz.
+
+-   **Success Response:**
+    ```json
+    {
+      "success": true,
+      "data": {
+        "attemptId": "uuid",
+        "totalScore": 10,
+        "severity": "LOW"
+      }
+    }
+    ```
+
+---
+
+## 7. Subscription
 
 ### `GET /api/subscriptions/me`
 
-Retrieves the current user's subscription status.
+Gets current subscription status.
 
--   **Permissions:** `USER`
--   **Success Response (200 OK):** `SubscriptionStatusRes`
-    -   **Note:** This is currently mocked.
+-   **Success Response:** `SubscriptionStatusRes` (Mocked)
 
 ### `POST /api/subscriptions/upgrade`
 
-Upgrades the user's subscription tier.
+Upgrades tier.
 
--   **Permissions:** `USER`
--   **Request Body:** `UpgradeReq {targetTier}`
--   **Success Response (200 OK):** `SubscriptionStatusRes`
-    -   **Note:** This is currently mocked to grant a 30-day subscription to the target tier.
+-   **Request Body:** `{ "targetTier": "PREMIUM" }`
+-   **Success Response:** `SubscriptionStatusRes`

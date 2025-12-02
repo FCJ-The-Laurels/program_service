@@ -14,6 +14,7 @@ import java.util.UUID;
 
 public interface StepAssignmentService {
     List<StepAssignment> listByProgram(UUID programId);
+    org.springframework.data.domain.Page<StepAssignment> listByProgram(UUID programId, int page, int size);
     List<StepAssignment> listByProgramAndDate(UUID programId, LocalDate date);
     StepAssignment getOne(UUID programId, UUID id);
     StepAssignment create(UUID programId, CreateStepAssignmentReq req);

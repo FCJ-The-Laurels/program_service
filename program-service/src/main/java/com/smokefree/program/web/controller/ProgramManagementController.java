@@ -3,6 +3,7 @@ package com.smokefree.program.web.controller;
 import com.smokefree.program.domain.model.Program;
 import com.smokefree.program.domain.model.ProgramStatus;
 import com.smokefree.program.domain.repo.ProgramRepository;
+import com.smokefree.program.domain.service.ProgramService;
 import com.smokefree.program.util.SecurityUtil;
 import com.smokefree.program.web.dto.program.*;
 import com.smokefree.program.web.error.ConflictException;
@@ -10,6 +11,7 @@ import com.smokefree.program.web.error.NotFoundException;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.data.domain.Page;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
 
@@ -29,6 +31,7 @@ import java.util.UUID;
 public class ProgramManagementController {
 
     private final ProgramRepository programRepository;
+    private final ProgramService programService;
 
     /**
      * Upgrade từ trial → paid (sau khi payment service xác nhận).
@@ -290,6 +293,29 @@ public class ProgramManagementController {
                 p.getId(), p.getStatus(), p.getPlanDays(), p.getStartDate(),
                 p.getCurrentDay(), p.getSeverity(), p.getTotalScore(), ent, access
         );
+    }
+
+    /**
+     * [ADMIN] Lấy danh sách Program phân trang, tránh load toàn bộ.
+     */
+    @GetMapping("/admin")
+    @PreAuthorize("hasRole('ADMIN')")
+    public org.springframework.data.domain.Page<com.smokefree.program.web.dto.program.AdminProgramRes> listAllPaged(
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "50") int size) {
+
+        return programService.listAll(page, size)
+                .map(p -> new com.smokefree.program.web.dto.program.AdminProgramRes(
+                        p.getId(),
+                        p.getUserId(),
+                        p.getStatus(),
+                        p.getPlanDays(),
+                        p.getStartDate(),
+                        p.getCurrentDay(),
+                        p.getTemplateCode(),
+                        p.getTemplateName(),
+                        p.getCreatedAt()
+                ));
     }
 }
 

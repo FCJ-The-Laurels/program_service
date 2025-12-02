@@ -3,6 +3,7 @@ package com.smokefree.program.domain.service.quiz.impl.quiz;
 import com.smokefree.program.domain.model.SeverityLevel;
 import com.smokefree.program.domain.service.QuizService;
 import com.smokefree.program.domain.service.quiz.SeverityRuleService;
+import com.smokefree.program.domain.repo.QuizTemplateRepository;
 import com.smokefree.program.web.dto.quiz.*;
 import com.smokefree.program.web.error.ValidationException;
 import lombok.RequiredArgsConstructor;
@@ -16,11 +17,26 @@ import java.util.UUID;
 public class QuizServiceImpl implements QuizService {
 
     private final SeverityRuleService severityRules;
+    private final QuizTemplateRepository quizTemplateRepository;
 
     @Override
     public QuizAnswerRes submitAnswers(UUID userId, QuizAnswerReq req, String userTier) {
-        if (req.answers() == null || req.answers().size() != 10)
-            throw new ValidationException("Must provide exactly 10 answers");
+        if (req.answers() == null || req.answers().isEmpty()) {
+            throw new ValidationException("Must provide at least 1 answer");
+        }
+
+        int expected = req.answers().size();
+        if (req.templateId() != null) {
+            var tpl = quizTemplateRepository.findById(req.templateId())
+                    .orElseThrow(() -> new ValidationException("Quiz template not found: " + req.templateId()));
+            expected = tpl.getQuestions() == null ? 0 : tpl.getQuestions().size();
+            if (expected <= 0) {
+                throw new ValidationException("Quiz template has no questions");
+            }
+            if (req.answers().size() != expected) {
+                throw new ValidationException("Must provide exactly " + expected + " answers");
+            }
+        }
 
         int total = req.answers().stream().mapToInt(a -> {
             int score = a.score();

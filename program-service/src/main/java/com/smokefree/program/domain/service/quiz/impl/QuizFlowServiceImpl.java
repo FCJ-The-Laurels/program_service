@@ -36,6 +36,7 @@ public class QuizFlowServiceImpl implements QuizFlowService {
     private final SeverityRuleService severityRuleService;
     private final StreakBreakRepository streakBreakRepository;
     private final StreakService streakService; // Thêm StreakService
+    private final StreakRepository streakRepository;
 
     @Override
     @Transactional(readOnly = true)
@@ -49,6 +50,9 @@ public class QuizFlowServiceImpl implements QuizFlowService {
         if (program == null) {
             log.warn("[QuizFlow] No active program found for userId: {}", userId);
             return List.of();
+        }
+        if (program.getTrialEndExpected() != null && Instant.now().isAfter(program.getTrialEndExpected())) {
+            throw new com.smokefree.program.web.error.SubscriptionRequiredException("Trial expired");
         }
         log.info("[QuizFlow] Found active program: {}, currentDay: {}", program.getId(), program.getCurrentDay());
 
@@ -300,6 +304,52 @@ public class QuizFlowServiceImpl implements QuizFlowService {
     }
 
     private void handlePostSubmissionActions(QuizAttempt attempt) {
+        QuizAssignment assignment = quizAssignmentRepository
+                .findActiveByProgramAndTemplate(attempt.getProgramId(), attempt.getTemplateId())
+                .orElse(null);
+
+        if (assignment == null) {
+            return; // Không tìm thấy assignment, bỏ qua
+        }
+        if (!assignment.isActive()) {
+            log.info("[QuizFlow] Assignment {} already inactive, skip post-submit handling.", assignment.getId());
+            return;
+        }
+
+        if (assignment.getOrigin() == QuizAssignmentOrigin.STREAK_RECOVERY) {
+            log.info("[QuizFlow] Handling STREAK_RECOVERY post-submission for program: {}", attempt.getProgramId());
+
+            List<StreakBreak> breaks = streakBreakRepository
+                    .findByProgramIdOrderByBrokenAtDesc(attempt.getProgramId());
+            StreakBreak lastBreak = breaks.isEmpty() ? null : breaks.get(0);
+
+            if (lastBreak != null) {
+                var brokenStreak = streakRepository.findById(lastBreak.getStreakId()).orElse(null);
+                if (brokenStreak != null && brokenStreak.getEndedAt() == null) {
+                    log.info("[QuizFlow] Streak {} already restored, skip duplicate recovery.", brokenStreak.getId());
+                } else {
+                    log.info("[QuizFlow] Found last streak break {}. Calling StreakService to restore.", lastBreak.getId());
+                    streakService.restoreStreak(lastBreak.getId());
+
+                    Program program = programRepository.findById(attempt.getProgramId()).orElse(null);
+                    if (program != null) {
+                        program.setStreakRecoveryUsedCount(program.getStreakRecoveryUsedCount() + 1);
+                        programRepository.save(program);
+                    }
+                }
+            } else {
+                log.warn("[QuizFlow] No streak break found for program {}. Cannot restore streak.", attempt.getProgramId());
+            }
+
+            assignment.setActive(false);
+            quizAssignmentRepository.save(assignment);
+        }
+
+        // (Có thể thêm xử lý khác cho các loại quiz khác trong tương lai)
+    }
+
+    @Deprecated
+    private void handlePostSubmissionActionsLegacy(QuizAttempt attempt) {
         QuizAssignment assignment = quizAssignmentRepository
                 .findActiveByProgramAndTemplate(attempt.getProgramId(), attempt.getTemplateId())
                 .orElse(null);

@@ -4,18 +4,23 @@ import com.smokefree.program.domain.model.*;
 import com.smokefree.program.domain.repo.*;
 import com.smokefree.program.domain.service.ProgramCreationService;
 import com.smokefree.program.domain.service.ProgramService;
+import com.smokefree.program.domain.service.onboarding.BaselineResultService;
 import com.smokefree.program.domain.service.smoke.StepAssignmentService;
 import com.smokefree.program.web.dto.program.*;
 import com.smokefree.program.web.error.ConflictException;
 import com.smokefree.program.web.error.NotFoundException;
 import com.smokefree.program.web.error.SubscriptionRequiredException;
+import com.smokefree.program.web.error.ValidationException;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
-import java.time.*;
-import java.util.*;
+import java.time.Instant;
+import java.util.Collections;
+import java.util.List;
+import java.util.Optional;
+import java.util.UUID;
 
 @Service
 @RequiredArgsConstructor
@@ -27,39 +32,67 @@ public class ProgramServiceImpl implements ProgramService {
     private final QuizAssignmentRepository quizAssignmentRepo;
     private final PlanTemplateRepo planTemplateRepo;
     private final StepAssignmentService stepAssignmentService;
-    private final PlanQuizScheduleRepository planQuizScheduleRepo; // Thêm dependency mới
+    private final PlanQuizScheduleRepository planQuizScheduleRepo;
+    private final BaselineResultService baselineResultService;
 
     @Override
     @Transactional
     public ProgramRes createProgram(UUID ownerUserId, CreateProgramReq req, String tierHeader) {
+        // 1. Validate Baseline
+        if (!baselineResultService.hasBaseline(ownerUserId)) {
+            throw new ValidationException("Onboarding quiz is required before creating a program");
+        }
+
+        // 2. Check Active Program
         repo.findFirstByUserIdAndStatusAndDeletedAtIsNull(ownerUserId, ProgramStatus.ACTIVE)
                 .ifPresent(p -> { throw new ConflictException("User already has ACTIVE program"); });
 
-        int planDays = (req.planDays() == null ? 30 : req.planDays());
-        
-        PlanTemplate template = planTemplateRepo.findAll().stream()
-                .filter(t -> t.getTotalDays() == planDays)
-                .findFirst()
-                .orElseThrow(() -> new NotFoundException("No plan template found for " + planDays + " days"));
+        // 3. Find Template
+        PlanTemplate template;
+        if (req.planTemplateId() != null) {
+            // Ưu tiên tìm theo ID chính xác
+            template = planTemplateRepo.findById(req.planTemplateId())
+                    .orElseThrow(() -> new NotFoundException("Plan template not found: " + req.planTemplateId()));
+        } else {
+            // Fallback: Tìm theo days (Logic cũ)
+            int planDays = (req.planDays() == null ? 30 : req.planDays());
+            template = planTemplateRepo.findAll().stream()
+                    .filter(t -> t.getTotalDays() == planDays)
+                    .findFirst()
+                    .orElseThrow(() -> new NotFoundException("No plan template found for " + planDays + " days"));
+        }
 
-        Program p = programCreationService.createPaidProgram(ownerUserId, planDays, tierHeader);
+        int planDays = template.getTotalDays();
+
+        // 4. Create Program (Trial vs Paid)
+        Program p;
+        // Mặc định Trial = true nếu không gửi lên (khuyến khích dùng thử)
+        boolean isTrial = (req.trial() == null || Boolean.TRUE.equals(req.trial()));
+
+        if (isTrial) {
+            // Hardcode trial 7 ngày hoặc config
+            p = programCreationService.createTrialProgram(ownerUserId, planDays, 7, tierHeader);
+        } else {
+            p = programCreationService.createPaidProgram(ownerUserId, planDays, tierHeader);
+        }
+
+        // 5. Link Template Info
         p.setPlanTemplateId(template.getId());
         p.setTemplateCode(template.getCode());
         p.setTemplateName(template.getName());
-        
+        p.setCoachId(req.coachId());
+
         p = repo.save(p);
 
+        // 6. Assign Steps & Quizzes
         stepAssignmentService.createForProgramFromTemplate(p, template);
-
-        // Gọi logic gán quiz đã được sửa đổi
         assignSystemQuizzes(p);
+
+        log.info("Created Program {} for user {} (Trial: {})", p.getId(), ownerUserId, isTrial);
 
         return toRes(p, "ACTIVE", null, tierHeader);
     }
 
-    /**
-     * Logic mới: Gán quiz một cách linh hoạt dựa trên cấu hình của PlanTemplate.
-     */
     private void assignSystemQuizzes(Program program) {
         UUID planTemplateId = program.getPlanTemplateId();
         if (planTemplateId == null) {
@@ -67,10 +100,8 @@ public class ProgramServiceImpl implements ProgramService {
             return;
         }
 
-        // 1. Tìm tất cả "thời khóa biểu" quiz đã được Admin cấu hình cho Plan Template này
         List<PlanQuizSchedule> schedules = planQuizScheduleRepo.findByPlanTemplateIdOrderByStartOffsetDayAscOrderNoAsc(planTemplateId);
 
-        // 2. Lặp qua từng "thời khóa biểu" và tạo "lịch hẹn" (QuizAssignment) cho người dùng
         for (PlanQuizSchedule schedule : schedules) {
             if (!quizAssignmentRepo.existsByTemplateIdAndProgramId(schedule.getQuizTemplateId(), program.getId())) {
                 QuizAssignment assignment = new QuizAssignment();
@@ -88,7 +119,7 @@ public class ProgramServiceImpl implements ProgramService {
                 assignment.setOrigin(isRecurring ? QuizAssignmentOrigin.AUTO_WEEKLY : QuizAssignmentOrigin.SYSTEM_ONBOARDING);
                 assignment.setActive(true);
                 assignment.setCreatedAt(Instant.now());
-                
+
                 quizAssignmentRepo.save(assignment);
             }
         }
@@ -97,7 +128,7 @@ public class ProgramServiceImpl implements ProgramService {
     @Override
     public Optional<Program> getActive(UUID userId) {
         Optional<Program> pOpt = repo.findFirstByUserIdAndStatusAndDeletedAtIsNull(userId, ProgramStatus.ACTIVE);
-        
+
         if (pOpt.isPresent()) {
             Program p = pOpt.get();
             if (p.getTrialEndExpected() != null && Instant.now().isAfter(p.getTrialEndExpected())) {
@@ -116,7 +147,7 @@ public class ProgramServiceImpl implements ProgramService {
         } else if ("premium".equalsIgnoreCase(effectiveTier)) {
             features = List.of("forum");
         } else {
-            features = Collections.emptyList(); 
+            features = Collections.emptyList();
         }
         Entitlements ent = new Entitlements(effectiveTier, features);
         Access access = new Access(entState, entExp, tier);
@@ -125,9 +156,16 @@ public class ProgramServiceImpl implements ProgramService {
                 p.getCurrentDay(), p.getSeverity(), p.getTotalScore(), ent, access
         );
     }
-    
+
     @Override
     public List<Program> listByUser(UUID userId) {
         return repo.findByUserIdOrderByCreatedAtDesc(userId);
+    }
+
+    @Override
+    public org.springframework.data.domain.Page<Program> listAll(int page, int size) {
+        var pageable = org.springframework.data.domain.PageRequest.of(Math.max(page, 0), Math.max(size, 1),
+                org.springframework.data.domain.Sort.by("createdAt").descending());
+        return repo.findAll(pageable);
     }
 }

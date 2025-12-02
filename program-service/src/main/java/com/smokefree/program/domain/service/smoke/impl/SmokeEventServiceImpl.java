@@ -177,6 +177,12 @@ public class SmokeEventServiceImpl implements SmokeEventService {
         UUID userId = SecurityUtil.requireUserId();
         Program program = programRepository.findById(programId)
                 .orElseThrow(() -> new NotFoundException("Program not found: " + programId));
+
+        // Chặn khi hết trial
+        if (program.getTrialEndExpected() != null && java.time.Instant.now().isAfter(program.getTrialEndExpected())) {
+            throw new com.smokefree.program.web.error.SubscriptionRequiredException("Trial expired");
+        }
+
         boolean isOwner = program.getUserId().equals(userId);
         boolean isCoach = program.getCoachId() != null && program.getCoachId().equals(userId) && SecurityUtil.hasRole("COACH");
         if (!isOwner && !isCoach) {

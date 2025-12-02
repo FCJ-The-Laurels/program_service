@@ -13,5 +13,7 @@ public interface ProgramService {
     ProgramRes toRes(Program p, String entState, Instant entExp, String tier);
     List<Program> listByUser(UUID userId);
 
+    org.springframework.data.domain.Page<Program> listAll(int page, int size);
+
 }
 

@@ -112,7 +112,51 @@ public class StepAssignmentServiceImpl implements StepAssignmentService {
      * Xử lý logic khi một ngày thông thường (REGULAR) được hoàn thành.
      * Đây là nơi logic cập nhật streak được triển khai.
      */
+    /**
+     * X? l� c?p nh?t streak khi ho�n th�nh h?t step c?a m?t ng�y, c� ch?n tru?ng h?p v?a c� smoke.
+     */
     private void handleDayCompletion(UUID programId, int plannedDay) {
+        long incompleteSteps = stepAssignmentRepository.countIncompleteStepsForDay(programId, plannedDay, StepStatus.COMPLETED);
+        if (incompleteSteps > 0) {
+            return;
+        }
+
+        log.info("[DayCompletion] All steps for day {} completed. Updating streak counts.", plannedDay, programId);
+
+        Program program = programRepository.findById(programId)
+            .orElseThrow(() -> new NotFoundException("Program not found: " + programId));
+
+        LocalDate completedDate = program.getStartDate().plusDays(plannedDay - 1);
+        if (program.getLastSmokeAt() != null) {
+            LocalDate lastSmokeDate = program.getLastSmokeAt().toLocalDate();
+            if (!lastSmokeDate.isBefore(completedDate)) {
+                log.info("[DayCompletion] Skip streak update because last smoke {} is on/after {}.", lastSmokeDate, completedDate);
+                return;
+            }
+        }
+
+        Streak activeStreak = streakRepo.findFirstByProgramIdAndEndedAtIsNullOrderByStartedAtDesc(programId)
+            .orElseGet(() -> {
+                Streak newStreak = new Streak();
+                newStreak.setProgramId(programId);
+                newStreak.setStartedAt(OffsetDateTime.now(ZoneOffset.UTC));
+                return streakRepo.save(newStreak);
+            });
+
+        LocalDate startDate = activeStreak.getStartedAt().toLocalDate();
+        long newStreakValue = ChronoUnit.DAYS.between(startDate, completedDate) + 1;
+
+        program.setStreakCurrent((int) newStreakValue);
+        if (program.getStreakCurrent() > program.getStreakBest()) {
+            program.setStreakBest(program.getStreakCurrent());
+        }
+
+        programRepository.save(program);
+        log.info("Successfully updated streak for program {}. New current: {}, New best: {}",
+                 programId, program.getStreakCurrent(), program.getStreakBest());
+    }
+
+    @Deprecated   private void handleDayCompletionLegacy(UUID programId, int plannedDay) {
         long incompleteSteps = stepAssignmentRepository.countIncompleteStepsForDay(programId, plannedDay, StepStatus.COMPLETED);
         if (incompleteSteps == 0) {
             log.info("[DayCompletion] All steps for day {} completed. Updating streak counts.", plannedDay, programId);
@@ -155,6 +199,15 @@ public class StepAssignmentServiceImpl implements StepAssignmentService {
     public List<StepAssignment> listByProgram(UUID programId) {
         ensureProgramAccess(programId, true);
         return stepAssignmentRepository.findByProgramIdOrderByStepNoAsc(programId);
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public org.springframework.data.domain.Page<StepAssignment> listByProgram(UUID programId, int page, int size) {
+        ensureProgramAccess(programId, true);
+        var pageable = org.springframework.data.domain.PageRequest.of(Math.max(page, 0), Math.max(size, 1),
+                org.springframework.data.domain.Sort.by("stepNo").ascending());
+        return stepAssignmentRepository.findByProgramId(programId, pageable);
     }
 
     @Override
@@ -249,6 +302,12 @@ public class StepAssignmentServiceImpl implements StepAssignmentService {
         UUID userId = SecurityUtil.requireUserId();
         Program program = programRepository.findById(programId)
                 .orElseThrow(() -> new NotFoundException("Program not found: " + programId));
+
+        // Chặn khi hết trial
+        if (program.getTrialEndExpected() != null && java.time.Instant.now().isAfter(program.getTrialEndExpected())) {
+            throw new com.smokefree.program.web.error.SubscriptionRequiredException("Trial expired");
+        }
+
         boolean isOwner = program.getUserId().equals(userId);
         boolean isCoach = program.getCoachId() != null && program.getCoachId().equals(userId) && SecurityUtil.hasRole("COACH");
         if (!isOwner && !isCoach) {
@@ -259,3 +318,5 @@ public class StepAssignmentServiceImpl implements StepAssignmentService {
         }
     }
 }
+
+

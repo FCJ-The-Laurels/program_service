@@ -30,4 +30,6 @@ public interface QuizAssignmentRepository extends JpaRepository<QuizAssignment, 
                      qa.createdAt ASC
             """)
     List<QuizAssignment> findActiveSortedByStartOffset(UUID programId);
+
+    boolean existsByTemplateId(UUID templateId);
 }

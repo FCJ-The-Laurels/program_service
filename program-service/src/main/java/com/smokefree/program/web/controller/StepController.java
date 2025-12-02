@@ -36,8 +36,13 @@ public class StepController {
 
     @GetMapping
     @PreAuthorize("isAuthenticated()")
-    public List<StepAssignment> list(@PathVariable UUID programId) {
+    public Object list(@PathVariable UUID programId,
+                       @RequestParam(name = "page", required = false) Integer page,
+                       @RequestParam(name = "size", required = false) Integer size) {
         log.info("[Step] LIST programId={}", programId);
+        if (page != null && size != null) {
+            return service.listByProgram(programId, page, size);
+        }
         return service.listByProgram(programId);
     }
 
