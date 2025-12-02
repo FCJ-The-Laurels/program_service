@@ -87,7 +87,7 @@ public class StepController {
     }
 
     @PatchMapping("/{id}/status")
-    @PreAuthorize("hasAnyRole('USER','ADMIN')")
+    @PreAuthorize("hasAnyRole('CUSTOMER','ADMIN')")
     public void updateStatus(@PathVariable("programId") UUID programId,
                              @PathVariable("id") UUID assignmentId,
                              @RequestBody UpdateStepStatusReq req) {

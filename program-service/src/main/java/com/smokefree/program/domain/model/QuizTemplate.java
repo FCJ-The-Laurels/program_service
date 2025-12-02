@@ -2,8 +2,8 @@ package com.smokefree.program.domain.model;
 
 import jakarta.persistence.*;
 import lombok.*;
-import org.hibernate.annotations.JdbcType;
-import org.hibernate.dialect.PostgreSQLEnumJdbcType;
+import org.hibernate.annotations.JdbcTypeCode;
+import org.hibernate.type.SqlTypes;
 
 import java.time.Instant;
 import java.util.ArrayList;
@@ -32,6 +32,9 @@ public class QuizTemplate {
     @Id
     private UUID id;
 
+    @Column(name = "code", unique = true) // Thêm cột code, đảm bảo là duy nhất
+    private String code;
+
     @Column(name = "name", nullable = false)
     private String name;
 
@@ -40,21 +43,16 @@ public class QuizTemplate {
     private Integer version;
 
     @Enumerated(EnumType.STRING)
-    @JdbcType(PostgreSQLEnumJdbcType.class)
-    @Column(
-            name = "status",
-            nullable = false,
-            columnDefinition = "program.quiz_template_status"
-    )
+    @Column(name = "status", nullable = false)
+    @JdbcTypeCode(SqlTypes.NAMED_ENUM)
     private QuizTemplateStatus status;
 
     @Column(name = "language_code")
     private String languageCode;
 
-    // DB: scope text DEFAULT 'system'
-    // -> dùng enum ở Java, lưu EnumType.STRING vào cột text
     @Enumerated(EnumType.STRING)
     @Column(name = "scope", nullable = false)
+    @JdbcTypeCode(SqlTypes.NAMED_ENUM)
     private QuizTemplateScope scope;     // SYSTEM | COACH (MVP luôn SYSTEM)
 
     @Column(name = "owner_id")

@@ -11,5 +11,7 @@ public record CreateSmokeEventReq(
         String note,
         OffsetDateTime eventAt,
         OffsetDateTime occurredAt,
-        @NotNull SmokeEventKind kind
+        @NotNull SmokeEventKind kind,
+        Integer puffs, // Thêm trường puffs
+        String reason   // Thêm trường reason
         ) {}

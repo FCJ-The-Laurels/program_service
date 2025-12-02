@@ -2,6 +2,9 @@ package com.smokefree.program.domain.model;
 
 import jakarta.persistence.*;
 import lombok.*;
+import org.hibernate.annotations.JdbcTypeCode;
+import org.hibernate.type.SqlTypes;
+
 import java.time.*;
 import java.util.UUID;
 
@@ -21,6 +24,7 @@ public class Program {
     private int planDays; // 30|45|60
 
     @Enumerated(EnumType.STRING) @Column(nullable=false)
+    @JdbcTypeCode(SqlTypes.NAMED_ENUM)
     private ProgramStatus status = ProgramStatus.ACTIVE;
 
     @Column(nullable=false)
@@ -30,6 +34,7 @@ public class Program {
 
     private Integer totalScore;
     @Enumerated(EnumType.STRING)
+    @JdbcTypeCode(SqlTypes.NAMED_ENUM)
     private SeverityLevel severity;
 
     // snapshot trial
@@ -62,10 +67,8 @@ public class Program {
     private int streakBest = 0;
 
     @Column(name = "last_smoke_at")
-    // optional: columnDefinition = "timestamptz"
     private OffsetDateTime lastSmokeAt;
 
-    // Thêm nếu DB có cột này
     @Column(name = "streak_frozen_until")
     private OffsetDateTime streakFrozenUntil;
 
@@ -77,4 +80,7 @@ public class Program {
 
     @Column(name = "template_name")
     private String templateName;
+
+    @Column(name = "streak_recovery_used_count", nullable = false)
+    private int streakRecoveryUsedCount = 0;
 }

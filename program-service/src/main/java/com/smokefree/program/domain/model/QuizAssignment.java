@@ -3,8 +3,8 @@ package com.smokefree.program.domain.model;
 import jakarta.persistence.*;
 import lombok.Getter;
 import lombok.Setter;
-import org.hibernate.annotations.JdbcType;
-import org.hibernate.dialect.PostgreSQLEnumJdbcType;
+import org.hibernate.annotations.JdbcTypeCode;
+import org.hibernate.type.SqlTypes;
 
 import java.time.Instant;
 import java.time.OffsetDateTime;
@@ -53,23 +53,17 @@ public class QuizAssignment {
     @Column(name = "every_days", nullable = false)
     private Integer everyDays = 5;
 
-    // DB: scope text DEFAULT 'system'
-    // -> dùng enum AssignmentScope, lưu EnumType.STRING vào text
     @Enumerated(EnumType.STRING)
     @Column(name = "scope", nullable = false)
+    @JdbcTypeCode(SqlTypes.NAMED_ENUM)
     private AssignmentScope scope = AssignmentScope.DAY;
 
     @Column(name = "expires_at")
     private OffsetDateTime expiresAt;
 
-    // DB: origin program.quiz_assignment_origin
     @Enumerated(EnumType.STRING)
-    @JdbcType(PostgreSQLEnumJdbcType.class)
-    @Column(
-            name = "origin",
-            nullable = false,
-            columnDefinition = "program.quiz_assignment_origin"
-    )
+    @Column(name = "origin", nullable = false)
+    @JdbcTypeCode(SqlTypes.NAMED_ENUM)
     private QuizAssignmentOrigin origin = QuizAssignmentOrigin.MANUAL;
 
     @PrePersist

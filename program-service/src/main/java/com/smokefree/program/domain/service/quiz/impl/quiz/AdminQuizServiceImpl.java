@@ -27,6 +27,7 @@ public class AdminQuizServiceImpl implements AdminQuizService {
         // 1. Tạo đối tượng QuizTemplate cha
         QuizTemplate template = new QuizTemplate();
         template.setName(req.name());
+        template.setCode(req.code()); // Thêm dòng này để gán code
         template.setVersion(req.version() != null ? req.version() : 1);
         // Các giá trị mặc định khác sẽ được set bởi @PrePersist trong Entity
 

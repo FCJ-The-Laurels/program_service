@@ -3,6 +3,8 @@ package com.smokefree.program.domain.model;
 import jakarta.persistence.*;
 import lombok.Getter;
 import lombok.Setter;
+import org.hibernate.annotations.JdbcTypeCode;
+import org.hibernate.type.SqlTypes;
 
 import java.time.Instant;
 import java.util.ArrayList;
@@ -21,7 +23,10 @@ public class QuizAttempt {
     private UUID userId;
     private Instant openedAt;
     private Instant submittedAt;
-    @Enumerated(EnumType.STRING) private AttemptStatus status; // OPEN/SUBMITTED
+
+    @Enumerated(EnumType.STRING)
+    @JdbcTypeCode(SqlTypes.NAMED_ENUM)
+    private AttemptStatus status; // OPEN/SUBMITTED
 
     @OneToMany(mappedBy = "attempt", cascade = CascadeType.ALL, orphanRemoval = true)
     private List<QuizAnswer> answers = new ArrayList<>();

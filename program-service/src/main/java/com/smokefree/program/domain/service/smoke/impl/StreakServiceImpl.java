@@ -13,6 +13,7 @@ import com.smokefree.program.web.error.NotFoundException;
 import com.smokefree.program.domain.repo.ProgramRepository;
 import com.smokefree.program.util.SecurityUtil;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -21,10 +22,12 @@ import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
 import java.time.temporal.ChronoUnit;
 import java.util.List;
+import java.util.Optional;
 import java.util.UUID;
 
 @Service
 @RequiredArgsConstructor
+@Slf4j
 public class StreakServiceImpl implements StreakService {
 
     private final StreakRepository streakRepo;
@@ -35,7 +38,25 @@ public class StreakServiceImpl implements StreakService {
         if (start == null || end == null) return 0;
         var s = start.toInstant().atOffset(ZoneOffset.UTC).toLocalDate();
         var e = end.toInstant().atOffset(ZoneOffset.UTC).toLocalDate();
-        return (int) ChronoUnit.DAYS.between(s, e);
+        // Sửa lỗi: cộng thêm 1 để tính cả ngày bắt đầu
+        return (int) ChronoUnit.DAYS.between(s, e) + 1;
+    }
+
+    @Override
+    @Transactional
+    public void startOrContinueStreak(UUID programId) {
+        // This method is called when a day is completed.
+        // We now rely on the `programs.streak_current` column, which is updated by StepAssignmentService.
+        // However, we can ensure a historical streak record exists.
+        ensureProgramAccess(programId, false);
+        Optional<Streak> currentStreak = streakRepo.findFirstByProgramIdAndEndedAtIsNullOrderByStartedAtDesc(programId);
+
+        if (currentStreak.isEmpty()) {
+            log.info("[Streak] No active historical streak found for program {}. Starting a new one.", programId);
+            start(programId, OffsetDateTime.now(ZoneOffset.UTC));
+        } else {
+            log.info("[Streak] Program {} already has an active historical streak. No action needed.", programId);
+        }
     }
 
     @Override
@@ -44,21 +65,19 @@ public class StreakServiceImpl implements StreakService {
         ensureProgramAccess(programId, false);
         Program program = programRepository.findById(programId)
                 .orElseThrow(() -> new NotFoundException("Program not found: " + programId));
+        
+        // Only create if no active historical streak exists
+        streakRepo.findFirstByProgramIdAndEndedAtIsNullOrderByStartedAtDesc(programId).ifPresent(existing -> {
+            throw new IllegalStateException("An active historical streak already exists for this program.");
+        });
 
-        var cur = streakRepo.findFirstByProgramIdAndEndedAtIsNullOrderByStartedAtDesc(programId);
-        if (cur.isPresent()) {
-            var s = cur.get();
-            int days = daysBetween(s.getStartedAt(), OffsetDateTime.now(ZoneOffset.UTC));
-            program.setStreakCurrent(days);
-            programRepository.save(program);
-            return new StreakView(s.getId(), days, program.getStreakBest(), daysWithoutSmoke(program), s.getStartedAt(), s.getEndedAt());
-        }
-        var s = new Streak();
+        Streak s = new Streak();
         s.setId(UUID.randomUUID());
         s.setProgramId(programId);
         s.setStartedAt(startedAt != null ? startedAt : OffsetDateTime.now(ZoneOffset.UTC));
         streakRepo.save(s);
 
+        // Reset the counter in Program cache
         program.setStreakCurrent(0);
         programRepository.save(program);
 
@@ -68,64 +87,101 @@ public class StreakServiceImpl implements StreakService {
     @Override
     @Transactional
     public StreakView breakStreak(UUID programId, OffsetDateTime brokenAt, UUID smokeEventId, String note) {
-        ensureProgramAccess(programId, false);
-        Program program = programRepository.findById(programId)
-                .orElseThrow(() -> new NotFoundException("Program not found: " + programId));
-
-        var s = streakRepo.findFirstByProgramIdAndEndedAtIsNullOrderByStartedAtDesc(programId)
-                .orElseGet(() -> {
-                    var ns = new Streak();
-                    ns.setId(UUID.randomUUID());
-                    ns.setProgramId(programId);
-                    ns.setStartedAt(brokenAt != null ? brokenAt : OffsetDateTime.now(ZoneOffset.UTC));
-                    return streakRepo.save(ns);
-                });
-
-        var end = brokenAt != null ? brokenAt : OffsetDateTime.now(ZoneOffset.UTC);
-        if (s.getEndedAt() == null) {
-            int length = Math.max(daysBetween(s.getStartedAt(), end), 0);
-            s.setEndedAt(end);
-            s.setLengthDays(length);
-            streakRepo.save(s);
-        }
-
-        var b = new StreakBreak();
-        b.setId(UUID.randomUUID()); // Ensure ID is set
-        b.setStreakId(s.getId());
-        b.setProgramId(programId);
-        b.setSmokeEventId(smokeEventId);
-        b.setBrokenAt(end);
-        b.setPrevStreakDays(s.getLengthDays());
-        b.setNote(note);
-        breakRepo.save(b);
-
-        program.setStreakCurrent(0);
-        if (s.getLengthDays() != null && s.getLengthDays() > program.getStreakBest()) {
-            program.setStreakBest(s.getLengthDays());
-        }
-        programRepository.save(program);
-
-        return new StreakView(s.getId(), s.getLengthDays() == null ? 0 : s.getLengthDays(), program.getStreakBest(), daysWithoutSmoke(program), s.getStartedAt(), s.getEndedAt());
+        StreakBreak breakRecord = breakStreakAndLog(programId, brokenAt, smokeEventId, note);
+        Program program = programRepository.findById(programId).orElseThrow(() -> new NotFoundException("Program not found"));
+        return new StreakView(breakRecord.getStreakId(), breakRecord.getPrevStreakDays(), program.getStreakBest(), daysWithoutSmoke(program), null, breakRecord.getBrokenAt());
     }
 
     @Override
+    @Transactional
+    public StreakBreak breakStreakAndLog(UUID programId, OffsetDateTime brokenAt, UUID smokeEventId, String note) {
+        ensureProgramAccess(programId, false);
+        Program program = programRepository.findById(programId)
+                .orElseThrow(() -> new NotFoundException("Program not found: " + programId));
+        
+        // Find the active historical streak to close it
+        Streak streakToBreak = streakRepo.findFirstByProgramIdAndEndedAtIsNullOrderByStartedAtDesc(programId)
+                .orElseThrow(() -> new NotFoundException("No active streak to break for program " + programId));
+        
+        OffsetDateTime end = brokenAt != null ? brokenAt : OffsetDateTime.now(ZoneOffset.UTC);
+        int length = Math.max(1, daysBetween(streakToBreak.getStartedAt(), end)); // Đảm bảo độ dài tối thiểu là 1
+        streakToBreak.setEndedAt(end);
+        streakToBreak.setLengthDays(length);
+        streakRepo.save(streakToBreak);
+
+        // Create the break log
+        StreakBreak b = new StreakBreak();
+        b.setId(UUID.randomUUID());
+        b.setStreakId(streakToBreak.getId());
+        b.setProgramId(programId);
+        b.setSmokeEventId(smokeEventId);
+        b.setBrokenAt(end);
+        b.setPrevStreakDays(length);
+        b.setNote(note);
+        breakRepo.save(b);
+
+        // Update the cache in the Program entity
+        program.setStreakCurrent(0);
+        if (length > program.getStreakBest()) {
+            program.setStreakBest(length);
+        }
+        programRepository.save(program);
+        return b;
+    }
+
+    @Override
+    @Transactional
+    public void restoreStreak(UUID streakBreakId) {
+        StreakBreak breakRecord = breakRepo.findById(streakBreakId)
+                .orElseThrow(() -> new NotFoundException("StreakBreak record not found: " + streakBreakId));
+        ensureProgramAccess(breakRecord.getProgramId(), false);
+        
+        Streak brokenStreak = streakRepo.findById(breakRecord.getStreakId())
+                .orElseThrow(() -> new NotFoundException("The broken streak to restore was not found: " + breakRecord.getStreakId()));
+        
+        // "Revive" the historical streak record
+        brokenStreak.setEndedAt(null);
+        brokenStreak.setLengthDays(null);
+        streakRepo.save(brokenStreak);
+
+        // Update the cache in Program
+        Program program = programRepository.findById(breakRecord.getProgramId()).orElseThrow(() -> new NotFoundException("Program not found"));
+        // Sử dụng lại giá trị đã được tính toán chính xác từ breakRecord
+        int restoredDays = breakRecord.getPrevStreakDays();
+        program.setStreakCurrent(restoredDays);
+        programRepository.save(program);
+
+        log.info("Streak {} has been restored for program {}. Restored days: {}", brokenStreak.getId(), program.getId(), restoredDays);
+    }
+
+    /**
+     * Lấy thông tin streak hiện tại.
+     * PHIÊN BẢN MỚI: Chỉ đọc dữ liệu từ bảng `programs` làm nguồn chân lý chính.
+     */
+    @Override
+    @Transactional(readOnly = true)
     public StreakView current(UUID programId) {
         ensureProgramAccess(programId, true);
+        
+        // 1. Lấy Program làm nguồn chân lý cho các giá trị hiện tại và tốt nhất.
         Program program = programRepository.findById(programId)
                 .orElseThrow(() -> new NotFoundException("Program not found: " + programId));
 
-        var cur = streakRepo.findFirstByProgramIdAndEndedAtIsNullOrderByStartedAtDesc(programId);
-        if (cur.isEmpty()) return new StreakView(null, 0, program.getStreakBest(), daysWithoutSmoke(program), null, null);
+        // 2. (Tùy chọn) Tìm bản ghi streak lịch sử đang hoạt động để lấy ngày bắt đầu.
+        Optional<Streak> currentStreakOpt = streakRepo.findFirstByProgramIdAndEndedAtIsNullOrderByStartedAtDesc(programId);
         
-        var s = cur.get();
-        int days = daysBetween(s.getStartedAt(), OffsetDateTime.now(ZoneOffset.UTC));
-        program.setStreakCurrent(days);
-        if (days > program.getStreakBest()) {
-            program.setStreakBest(days);
-        }
-        programRepository.save(program);
+        UUID streakId = currentStreakOpt.map(Streak::getId).orElse(null);
+        OffsetDateTime startedAt = currentStreakOpt.map(Streak::getStartedAt).orElse(null);
 
-        return new StreakView(s.getId(), days, program.getStreakBest(), daysWithoutSmoke(program), s.getStartedAt(), s.getEndedAt());
+        // 3. Trả về DTO, luôn tin tưởng vào giá trị trong bảng `programs`.
+        return new StreakView(
+            streakId,
+            program.getStreakCurrent(),
+            program.getStreakBest(),
+            daysWithoutSmoke(program),
+            startedAt,
+            null // Nếu đang current thì endedAt luôn là null
+        );
     }
 
     @Override
@@ -133,7 +189,6 @@ public class StreakServiceImpl implements StreakService {
         ensureProgramAccess(programId, true);
         Program program = programRepository.findById(programId)
                 .orElseThrow(() -> new NotFoundException("Program not found: " + programId));
-
         return streakRepo.findByProgramIdOrderByStartedAtDesc(programId, PageRequest.of(0, Math.max(size, 1)))
                 .stream()
                 .map(s -> new StreakView(

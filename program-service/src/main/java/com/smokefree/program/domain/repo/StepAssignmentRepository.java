@@ -37,6 +37,6 @@ public interface StepAssignmentRepository extends JpaRepository<StepAssignment, 
     /**
      * Đếm số lượng step chưa hoàn thành (không phải COMPLETED) cho một ngày cụ thể của chương trình.
      */
-    @Query("SELECT COUNT(s) FROM StepAssignment s WHERE s.programId = :programId AND s.plannedDay = :plannedDay AND s.status <> com.smokefree.program.domain.model.StepStatus.COMPLETED")
-    long countIncompleteStepsForDay(@Param("programId") UUID programId, @Param("plannedDay") int plannedDay);
+    @Query("SELECT COUNT(s) FROM StepAssignment s WHERE s.programId = :programId AND s.plannedDay = :plannedDay AND s.status <> :status")
+    long countIncompleteStepsForDay(@Param("programId") UUID programId, @Param("plannedDay") int plannedDay, @Param("status") StepStatus status);
 }

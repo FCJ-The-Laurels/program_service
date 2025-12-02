@@ -1,7 +1,6 @@
 package com.smokefree.program.domain.service.smoke;
 
-import com.smokefree.program.domain.model.Program;
-import com.smokefree.program.domain.model.SmokeEvent;
+import com.smokefree.program.domain.model.StreakBreak;
 import com.smokefree.program.web.dto.streak.StreakBreakRes;
 import com.smokefree.program.web.dto.streak.StreakView;
 
@@ -15,4 +14,16 @@ public interface StreakService {
     StreakView current(UUID programId);
     List<StreakView> history(UUID programId, int size);
     List<StreakBreakRes> breaks(UUID programId, int size);
+    void startOrContinueStreak(UUID programId);
+
+    /**
+     * Ngắt một chuỗi và trả về bản ghi chi tiết của lần ngắt đó.
+     * Được sử dụng trong luồng phục hồi streak.
+     */
+    StreakBreak breakStreakAndLog(UUID programId, OffsetDateTime brokenAt, UUID smokeEventId, String note);
+
+    /**
+     * Phục hồi một chuỗi đã bị ngắt trước đó.
+     */
+    void restoreStreak(UUID streakBreakId);
 }

@@ -3,6 +3,7 @@ package com.smokefree.program.domain.service.quiz.impl;
 import com.smokefree.program.domain.model.*;
 import com.smokefree.program.domain.repo.*;
 import com.smokefree.program.domain.service.quiz.QuizFlowService;
+import com.smokefree.program.domain.service.smoke.StreakService;
 import com.smokefree.program.web.dto.quiz.answer.AnswerReq;
 import com.smokefree.program.web.dto.quiz.attempt.DueItem;
 import com.smokefree.program.web.dto.quiz.attempt.OpenAttemptRes;
@@ -33,6 +34,8 @@ public class QuizFlowServiceImpl implements QuizFlowService {
     private final QuizAttemptRepository quizAttemptRepository;
     private final QuizResultRepository quizResultRepository;
     private final SeverityRuleService severityRuleService;
+    private final StreakBreakRepository streakBreakRepository;
+    private final StreakService streakService; // Thêm StreakService
 
     @Override
     @Transactional(readOnly = true)
@@ -43,32 +46,51 @@ public class QuizFlowServiceImpl implements QuizFlowService {
             .findFirstByUserIdAndStatusAndDeletedAtIsNull(userId, ProgramStatus.ACTIVE)
             .orElse(null);
 
-        if (program == null) return List.of();
+        if (program == null) {
+            log.warn("[QuizFlow] No active program found for userId: {}", userId);
+            return List.of();
+        }
+        log.info("[QuizFlow] Found active program: {}, currentDay: {}", program.getId(), program.getCurrentDay());
+
 
         List<QuizAssignment> assignments = quizAssignmentRepository.findActiveSortedByStartOffset(program.getId());
+        log.info("[QuizFlow] Found {} active assignments for program.", assignments.size());
         
         record DueCandidate(QuizAssignment assignment, DueItem item) {}
         List<DueCandidate> result = new ArrayList<>();
         Instant now = Instant.now();
 
         for (var assignment : assignments) {
+            log.debug("[QuizFlow] Checking assignment for templateId: {}, origin: {}, startOffset: {}", 
+                      assignment.getTemplateId(), assignment.getOrigin(), assignment.getStartOffsetDay());
+
             boolean isDue = isQuizDue(assignment, program, now);
+            log.debug("[QuizFlow] isQuizDue returned: {}", isDue);
+
 
             if (isDue) {
                 boolean alreadyTaken = quizResultRepository.existsByProgramIdAndTemplateId(program.getId(), assignment.getTemplateId());
+                log.debug("[QuizFlow] alreadyTaken check returned: {}", alreadyTaken);
+
                 
-                if (assignment.getScope() == AssignmentScope.ONCE && alreadyTaken) {
-                    continue; 
+                // Bỏ qua quiz ONCE đã làm, TRỪ KHI nó là quiz đặc biệt có thể làm lại
+                boolean isRepeatable = (assignment.getOrigin() == QuizAssignmentOrigin.STREAK_RECOVERY);
+                if (assignment.getScope() == AssignmentScope.ONCE && alreadyTaken && !isRepeatable) {
+                    log.info("[QuizFlow] Skipping non-repeatable ONCE quiz that is already taken. TemplateId: {}", assignment.getTemplateId());
+                    continue;
                 }
 
                 QuizTemplate template = quizTemplateRepository.findById(assignment.getTemplateId()).orElse(null);
                 if (template != null) {
                     Instant displayDueDate = calculateDisplayDueDate(assignment, program);
                     boolean isOverdue = !displayDueDate.isAfter(now);
+                    log.info("[QuizFlow] Adding quiz to due list. TemplateId: {}", template.getId());
                     result.add(new DueCandidate(
                             assignment,
                             new DueItem(template.getId(), template.getName(), displayDueDate, isOverdue)
                     ));
+                } else {
+                    log.warn("[QuizFlow] QuizTemplate not found for assignment with templateId: {}", assignment.getTemplateId());
                 }
             }
         }
@@ -87,17 +109,21 @@ public class QuizFlowServiceImpl implements QuizFlowService {
 
     private boolean isQuizDue(QuizAssignment assignment, Program program, Instant now) {
         int startOffset = Optional.ofNullable(assignment.getStartOffsetDay()).orElse(0);
+        log.debug("[isQuizDue] Checking: startOffset={}, program.currentDay={}", startOffset, program.getCurrentDay());
         if (startOffset > 0 && program.getCurrentDay() < startOffset) {
+            log.debug("[isQuizDue] Result: false (currentDay < startOffset)");
             return false;
         }
 
         int interval = Optional.ofNullable(assignment.getEveryDays()).orElse(0);
         if (interval > 0) {
             Instant dueDate = calculateDisplayDueDate(assignment, program);
-            return !dueDate.isAfter(now);
+            boolean isAfter = !dueDate.isAfter(now);
+            log.debug("[isQuizDue] Interval check: dueDate={}, now={}, isDue={}", dueDate, now, isAfter);
+            return isAfter;
         }
 
-        // ONCE hoặc không có interval: chỉ cần qua startOffset
+        log.debug("[isQuizDue] Result: true (ONCE or no interval)");
         return true;
     }
 
@@ -154,8 +180,9 @@ public class QuizFlowServiceImpl implements QuizFlowService {
                 .findActiveByProgramAndTemplate(program.getId(), templateId)
                 .orElseThrow(() -> new ForbiddenException("Template not assigned to your program"));
 
+        boolean isRepeatable = (assignment.getOrigin() == QuizAssignmentOrigin.STREAK_RECOVERY);
         if (assignment.getScope() == AssignmentScope.ONCE &&
-                quizResultRepository.existsByProgramIdAndTemplateId(program.getId(), templateId)) {
+                quizResultRepository.existsByProgramIdAndTemplateId(program.getId(), templateId) && !isRepeatable) {
             throw new ConflictException("Quiz already completed");
         }
 
@@ -266,6 +293,46 @@ public class QuizFlowServiceImpl implements QuizFlowService {
         attempt.setSubmittedAt(Instant.now());
         quizAttemptRepository.save(attempt);
 
+        // === LOGIC NGHIỆP VỤ ĐẶC BIỆT: XỬ LÝ SAU KHI NỘP QUIZ ===
+        handlePostSubmissionActions(attempt);
+
         return new SubmitRes(attempt.getId(), totalScore, severity.name());
+    }
+
+    private void handlePostSubmissionActions(QuizAttempt attempt) {
+        QuizAssignment assignment = quizAssignmentRepository
+                .findActiveByProgramAndTemplate(attempt.getProgramId(), attempt.getTemplateId())
+                .orElse(null);
+
+        if (assignment == null) {
+            return; // Không tìm thấy assignment, không xử lý gì thêm
+        }
+
+        // 1. Xử lý cho quiz "STREAK_RECOVERY"
+        if (assignment.getOrigin() == QuizAssignmentOrigin.STREAK_RECOVERY) {
+            log.info("[QuizFlow] Handling STREAK_RECOVERY post-submission for program: {}", attempt.getProgramId());
+            
+            // Tìm lần phá vỡ streak gần nhất để lấy ID của nó
+            List<StreakBreak> breaks = streakBreakRepository
+                    .findByProgramIdOrderByBrokenAtDesc(attempt.getProgramId());
+            StreakBreak lastBreak = breaks.isEmpty() ? null : breaks.get(0);
+
+            if (lastBreak != null) {
+                log.info("[QuizFlow] Found last streak break {}. Calling StreakService to restore.", lastBreak.getId());
+                streakService.restoreStreak(lastBreak.getId());
+                
+                // Tăng số lần sử dụng
+                Program program = programRepository.findById(attempt.getProgramId()).orElse(null);
+                if (program != null) {
+                    program.setStreakRecoveryUsedCount(program.getStreakRecoveryUsedCount() + 1);
+                    programRepository.save(program);
+                }
+
+            } else {
+                log.warn("[QuizFlow] No streak break found for program {}. Cannot restore streak.", attempt.getProgramId());
+            }
+        }
+
+        // (Có thể thêm các xử lý khác cho các loại quiz khác ở đây trong tương lai)
     }
 }

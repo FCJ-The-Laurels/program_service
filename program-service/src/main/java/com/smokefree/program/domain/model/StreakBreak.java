@@ -9,7 +9,7 @@ import java.util.UUID;
 @Table(name = "streak_breaks", schema = "program")
 @Getter @Setter
 public class StreakBreak {
-    @Id @GeneratedValue
+    @Id // Đã xóa @GeneratedValue
     private UUID id;
 
     @Column(name = "streak_id", nullable = false)
@@ -33,5 +33,8 @@ public class StreakBreak {
     @Column(name = "created_at", nullable = false)
     private Instant createdAt;
 
-    @PrePersist void pre() { if (createdAt == null) createdAt = Instant.now(); }
+    @PrePersist void pre() { 
+        if (createdAt == null) createdAt = Instant.now(); 
+        if (id == null) id = UUID.randomUUID(); // Đảm bảo ID được gán nếu chưa có
+    }
 }

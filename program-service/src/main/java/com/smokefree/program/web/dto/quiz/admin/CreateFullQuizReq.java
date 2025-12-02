@@ -7,6 +7,7 @@ import java.util.List;
 
 public record CreateFullQuizReq(
     @NotBlank String name,
+    String code, // Thêm trường code
     Integer version, // Tùy chọn, sẽ mặc định là 1 nếu không có
     @Valid @NotEmpty List<QuestionDto> questions
 ) {}

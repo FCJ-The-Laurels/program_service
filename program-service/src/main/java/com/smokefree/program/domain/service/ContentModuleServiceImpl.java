@@ -1,8 +1,7 @@
 package com.smokefree.program.domain.service;
 
 import com.smokefree.program.domain.model.ContentModule;
-import com.smokefree.program.domain.repo.ContentModuleRepo;
-
+import com.smokefree.program.domain.repo.ContentModuleRepository; // <-- SỬA Ở ĐÂY
 import com.smokefree.program.web.dto.module.*;
 import com.smokefree.program.web.error.NotFoundException;
 import com.smokefree.program.web.error.ValidationException;
@@ -23,7 +22,7 @@ import java.util.UUID;
 @Transactional(readOnly = true)
 public class ContentModuleServiceImpl implements ContentModuleService {
 
-    private final ContentModuleRepo contentModuleRepo;
+    private final ContentModuleRepository contentModuleRepo; // <-- SỬA Ở ĐÂY
 
     @Override
     @Transactional
