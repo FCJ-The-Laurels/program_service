@@ -71,8 +71,18 @@ public class SmokeEventServiceImpl implements SmokeEventService {
         program.setLastSmokeAt(now);
         log.debug("[SmokeEvent] Program.lastSmokeAt updated to {}", now);
 
-        if (req.kind() == SmokeEventKind.SLIP || req.kind() == SmokeEventKind.RELAPSE) {
-            log.info("[SmokeEvent] Breaking streak for programId: {}", programId);
+        if (req.kind() == SmokeEventKind.RELAPSE) {
+            log.warn("[SmokeEvent] RELAPSE detected for programId: {}. Performing HARD RESET.", programId);
+            // 1. Break streak hiện tại (ghi log break)
+            streakService.breakStreakAndLog(programId, now, event.getId(), req.note());
+            
+            // 2. KHÔNG cho khôi phục (bỏ qua handleRecoveryAssignment)
+            
+            // 3. Reset streak về 0 (bắt đầu streak mới ngay lập tức)
+            streakService.start(programId, now);
+            
+        } else if (req.kind() == SmokeEventKind.SLIP) {
+            log.info("[SmokeEvent] SLIP detected. Breaking streak and attempting recovery for programId: {}", programId);
             var breakRecord = streakService.breakStreakAndLog(programId, now, event.getId(), req.note()); 
             log.debug("[SmokeEvent] Streak break has been logged.");
 
