@@ -32,6 +32,8 @@ public class ProgramManagementController {
 
     private final ProgramRepository programRepository;
     private final ProgramService programService;
+    private final com.smokefree.program.domain.service.BadgeService badgeService;
+    private final com.smokefree.program.domain.repo.StepAssignmentRepository stepAssignmentRepository;
 
     /**
      * Upgrade từ trial → paid (sau khi payment service xác nhận).
@@ -124,6 +126,9 @@ public class ProgramManagementController {
         program.setStatus(ProgramStatus.COMPLETED);
         program = programRepository.save(program);
 
+        // Check for Completion Badge
+        badgeService.checkProgramMilestone(program);
+
         log.info("[Program] User {} ended program early. Program: {}", userId, id);
 
         return toRes(program, null, null, null);
@@ -149,6 +154,7 @@ public class ProgramManagementController {
         }
 
         program.setStatus(ProgramStatus.PAUSED);
+        program.setHasPaused(true);
         program = programRepository.save(program);
 
         log.info("[Program] User {} paused program. Program: {}", userId, id);
@@ -250,12 +256,29 @@ public class ProgramManagementController {
             throw new ConflictException("Access denied");
         }
 
+        // Auto-sync Current Day based on elapsed time (Fix for testing/time-travel)
+        if (program.getStartDate() != null && program.getStatus() == ProgramStatus.ACTIVE) {
+            long daysDiff = ChronoUnit.DAYS.between(program.getStartDate(), LocalDate.now(ZoneOffset.UTC));
+            int expectedCurrentDay = (int) daysDiff + 1;
+            
+            // Chỉ update nếu ngày tăng lên và chưa vượt quá tổng lộ trình
+            if (expectedCurrentDay > program.getCurrentDay() && expectedCurrentDay <= program.getPlanDays()) {
+                log.info("[Progress] Auto-sync currentDay from {} to {} for program {}", 
+                         program.getCurrentDay(), expectedCurrentDay, id);
+                program.setCurrentDay(expectedCurrentDay);
+                program = programRepository.save(program);
+            }
+        }
+
+        // Lazy Check Badge (e.g. Halfway)
+        badgeService.checkProgramMilestone(program);
+
         double percentComplete = (double) program.getCurrentDay() / program.getPlanDays() * 100;
         int daysRemaining = Math.max(0, program.getPlanDays() - program.getCurrentDay());
 
-        // TODO: Lấy stepsCompleted, stepsTotal từ StepAssignmentService
-        int stepsCompleted = 0;
-        int stepsTotal = 0;
+        // Fetch real stats from repository
+        int stepsTotal = (int) stepAssignmentRepository.countByProgramId(id);
+        int stepsCompleted = (int) stepAssignmentRepository.countByProgramIdAndStatus(id, com.smokefree.program.domain.model.StepStatus.COMPLETED);
 
         Integer trialRemainingDays = null;
         if (program.getTrialEndExpected() != null) {

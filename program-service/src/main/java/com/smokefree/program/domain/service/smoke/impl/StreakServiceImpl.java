@@ -237,13 +237,24 @@ public class StreakServiceImpl implements StreakService {
         }
     }
 
+    /**
+     * Calculates the number of days without smoke.
+     * <p>
+     * CRITICAL: Uses {@code ZoneOffset.UTC} for "now" to ensure consistency with the database
+     * (where dates are stored in UTC). Using system default timezone would lead to
+     * inconsistent results across servers in different regions.
+     * </p>
+     */
     private int daysWithoutSmoke(Program program) {
         try {
+            java.time.LocalDate nowUtc = java.time.LocalDate.now(ZoneOffset.UTC);
             if (program.getLastSmokeAt() != null) {
-                return (int) Math.max(0, ChronoUnit.DAYS.between(program.getLastSmokeAt().toLocalDate(), java.time.LocalDate.now()));
+                // Convert OffsetDateTime to LocalDate at UTC
+                java.time.LocalDate smokeDate = program.getLastSmokeAt().toInstant().atOffset(ZoneOffset.UTC).toLocalDate();
+                return (int) Math.max(0, ChronoUnit.DAYS.between(smokeDate, nowUtc));
             }
             if (program.getStartDate() != null) {
-                return (int) Math.max(0, ChronoUnit.DAYS.between(program.getStartDate(), java.time.LocalDate.now()));
+                return (int) Math.max(0, ChronoUnit.DAYS.between(program.getStartDate(), nowUtc));
             }
         } catch (Exception ignore) {}
         return 0;

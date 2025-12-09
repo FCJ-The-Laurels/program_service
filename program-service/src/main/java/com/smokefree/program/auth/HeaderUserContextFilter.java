@@ -18,6 +18,17 @@ import java.util.Arrays;
 import java.util.List;
 import java.util.UUID;
 
+/**
+ * Security Filter that extracts User Identity from HTTP Headers.
+ * <p>
+ * Expected Headers (from Upstream Gateway):
+ * - X-User-Id: UUID of the authenticated user.
+ * - X-User-Role: User role (ADMIN, COACH, CUSTOMER). Mapped to "ROLE_{ROLE}".
+ * - X-User-Tier: (Optional) Subscription tier (BASIC, PREMIUM, VIP). Mapped to "TIER_{TIER}".
+ * </p>
+ * This filter constructs the {@link org.springframework.security.core.Authentication} object
+ * tailored for the stateless microservice architecture.
+ */
 public class HeaderUserContextFilter extends OncePerRequestFilter {
 
     private final Environment env;

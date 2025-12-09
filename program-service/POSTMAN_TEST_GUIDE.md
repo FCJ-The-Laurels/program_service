@@ -1,217 +1,175 @@
-# Postman Test Guide - Program Service
+# Postman Test Guide - Program Service (v2.2 - with Badges)
 
-**Version:** 2.0 (Refactored)
-**Last Updated:** 2025-12-02
-**Status:** Verified against Source Code
-**Focus:** Complete API Coverage & Business-Standard Data
+**Last Updated:** 2025-12-04
+**Focus:** End-to-End Flows, Optimization Verification, Badge System.
 
-## 1. General Configuration
+## 1. Environment Setup
 
-### Environment Variables
-Thiết lập các biến này trong Postman Environment để tái sử dụng giữa các request.
+Set these variables in your Postman Environment:
 
-| Variable | Description | Example |
-|----------|-------------|---------|
-| `baseUrl` | API Gateway or Service URL | `http://localhost:8080` |
-| `userId` | UUID của User hiện tại | `00000000-0000-0000-0000-000000000001` |
-| `adminId` | UUID của Admin | `00000000-0000-0000-0000-000000000000` |
-| `programId` | UUID của Program đang active | *(Lấy từ response Create Program)* |
-| `onboardingTemplateId` | UUID của Quiz Onboarding | *(Lấy từ response Admin Create Quiz)* |
-| `attemptId` | UUID của lượt làm bài Quiz | *(Lấy từ response Open Attempt)* |
-| `planTemplateId` | UUID của gói lộ trình | *(Lấy từ Baseline Response)* |
+| Variable | Description | Value (Example) |
+|----------|-------------|-----------------|
+| `baseUrl` | Service URL | `http://localhost:8080` |
+| `userId` | User UUID | `00000000-0000-0000-0000-000000000001` |
+| `adminId` | Admin UUID | `00000000-0000-0000-0000-000000000000` |
+| `programId` | Active Program ID | *(Auto-set by tests)* |
+| `templateId` | Quiz Template ID | *(Auto-set by tests)* |
+| `onboardingTemplateId` | Onboarding Quiz ID | *(Auto-set by tests)* |
+| `weeklyQuizTemplateId` | Weekly Quiz ID | *(Auto-set by tests)* |
+| `attemptId` | Quiz Attempt ID | *(Auto-set by tests)* |
+| `planTemplateId` | Plan Template ID | *(Auto-set by tests)* |
 
-### Authentication Headers
-Hệ thống hỗ trợ 2 cơ chế Auth chính (tùy môi trường):
+### Authentication Headers (CRITICAL)
+This service uses header-based authentication. **Every request** must include:
 
-1.  **Development / Direct Call:**
-    *   `X-User-Id`: `<UUID>` (Bắt buộc)
-    *   `X-User-Role`: `CUSTOMER` | `COACH` | `ADMIN` (Optional)
-    *   `X-User-Tier`: `BASIC` | `PREMIUM` | `VIP` (Optional)
-
-2.  **Production (via Gateway):**
-    *   `Authorization`: `Bearer <JWT_TOKEN>`
+*   `X-User-Id`: `{{userId}}` (or `{{adminId}}` for admin routes)
+*   `X-User-Role`: `CUSTOMER` (or `ADMIN`, `COACH`)
+*   `X-User-Tier`: `BASIC` (or `PREMIUM`, `VIP`) - *Optional but recommended*
 
 ---
 
-## 2. Admin Flows (Setup Data)
+## 2. Core Flow: User Onboarding & Enrollment
 
-### 2.1. Create Quiz Template (Onboarding Assessment)
-Tạo bộ câu hỏi đánh giá mức độ nghiện (Fagerström) và động lực.
-**Endpoint:** `POST /v1/admin/quizzes`
-**Auth:** `ROLE_ADMIN` (Header `X-User-Id` + `X-User-Role: ADMIN`)
+### Step 1: Admin Setup - Create Quiz Templates & Plan (Pre-requisite)
+*   **Purpose:** Prepare data for user onboarding.
+*   **Actions:**
+    1.  **Create Onboarding Quiz:** (If not already exists).
+        *   **Method:** `POST`, **URL:** `{{baseUrl}}/v1/admin/quizzes`
+        *   **Headers:** `X-User-Id: {{adminId}}`, `X-User-Role: ADMIN`
+        *   **Body:** (Use a simple question set)
+        *   **Save:** `id` from response as `{{onboardingTemplateId}}`.
+    2.  **Create Weekly Check-in Quiz:** (For Quiz Badges)
+        *   **Method:** `POST`, **URL:** `{{baseUrl}}/v1/admin/quizzes`
+        *   **Headers:** `X-User-Id: {{adminId}}`, `X-User-Role: ADMIN`
+        *   **Body:** (Use questions that can result in LOW, MODERATE, HIGH severity)
+        *   **Save:** `id` from response as `{{weeklyQuizTemplateId}}`.
+    3.  **Create Plan Template:** (If needed, or use existing one).
+        *   **Method:** `POST`, **URL:** `{{baseUrl}}/v1/admin/plan-templates`
+        *   **Headers:** `X-User-Id: {{adminId}}`, `X-User-Role: ADMIN`
+        *   **Body:** (Define a 30-day plan with `planQuizSchedules` for `{{weeklyQuizTemplateId}}` at `startOffsetDay=7`, `everyDays=7`)
+        *   **Save:** `id` from response as `{{planTemplateId}}`.
 
-**Body (Standard Business Data):**
-```json
-{
-  "name": "Đánh giá đầu vào toàn diện",
-  "code": "ONBOARDING_ASSESSMENT",
-  "version": 1,
-  "questions": [
-    {
-      "orderNo": 1,
-      "questionText": "Bạn thường hút điếu thuốc đầu tiên bao lâu sau khi thức dậy?",
-      "type": "SINGLE_CHOICE",
-      "explanation": "Đánh giá mức độ phụ thuộc vật lý vào nicotine.",
-      "choices": [
-        { "labelCode": "WITHIN_5_MIN", "labelText": "Trong vòng 5 phút", "isCorrect": false, "weight": 3 },
-        { "labelCode": "WITHIN_30_MIN", "labelText": "Từ 6 - 30 phút", "isCorrect": false, "weight": 2 },
-        { "labelCode": "WITHIN_60_MIN", "labelText": "Từ 31 - 60 phút", "isCorrect": false, "weight": 1 },
-        { "labelCode": "AFTER_60_MIN", "labelText": "Sau 60 phút", "isCorrect": true, "weight": 0 }
-      ]
-    },
-    // ... (các câu hỏi khác giữ nguyên như cũ)
-  ]
-}
-```
+### Step 2: User Takes Baseline Quiz
+*   **Method:** `POST`
+*   **URL:** `{{baseUrl}}/api/onboarding/baseline`
+*   **Headers:** `X-User-Id: {{userId}}`, `X-User-Role: CUSTOMER`
+*   **Body:** (Use `{{onboardingTemplateId}}` and sample answers)
+*   **Verify:** Response contains `recommendedTemplateId`. Save this as `{{planTemplateId}}`.
 
----
-
-## 3. User Onboarding Flow
-
-### 3.1. Get Baseline Quiz
-**Endpoint:** `GET /api/onboarding/baseline/quiz`
-
-### 3.2. Submit Baseline & Recommendations
-Giả lập user trả lời quiz (dựa trên template ở phần 2.1) với mức độ nghiện trung bình-cao.
-**Endpoint:** `POST /api/onboarding/baseline`
-**Auth:** `X-User-Id`
-
-**Body:**
-```json
-{
-  "templateId": "{{onboardingTemplateId}}",
-  "answers": [
-    { "q": 1, "score": 3 },
-    { "q": 2, "score": 1 }
-  ]
-}
-```
-**Important Response:** Lưu `recommendedTemplateId` từ response này để dùng cho bước tạo Program.
-
-### 3.3. Create Program (Start Journey)
-**UPDATED:** Sử dụng API tạo program chuẩn, hỗ trợ Trial.
-**Endpoint:** `POST /v1/programs`
-**Auth:** `X-User-Id`
-
-**Body (Trial Mode):**
-```json
-{
-  "planTemplateId": "{{planTemplateId}}",
-  "trial": true,
-  "coachId": null
-}
-```
-
-**Body (Paid Mode):**
-```json
-{
-  "planTemplateId": "{{planTemplateId}}",
-  "trial": false
-}
-```
+### Step 3: Start Program (Enrollment)
+**Trigger Badge: Program Level 1 (Khởi Hành)**
+*   **Method:** `POST`
+*   **URL:** `{{baseUrl}}/v1/programs`
+*   **Body:** (Use `{{planTemplateId}}` and `trial: true` or `false`)
+*   **Verify:**
+    *   Response Status: `200 OK`.
+    *   Response Body: `status` is `ACTIVE`.
+    *   **Badge Check:** Call `GET {{baseUrl}}/api/me/badges`. User should have `PROG_LV1` badge.
 
 ---
 
-## 4. Program Management (Lifecycle & Progress)
+## 3. Core Flow: Quiz Execution & Quiz Badges
 
-### 4.1. Get Progress (Dashboard Detail)
-Xem chi tiết tiến độ, phần trăm hoàn thành.
-**Endpoint:** `GET /api/programs/{id}/progress`
-**Auth:** `X-User-Id` (Owner)
+### Step 1: List Due Quizzes
+*   **Method:** `GET`, **URL:** `{{baseUrl}}/v1/me/quizzes`
+*   **Verify:** Ensure weekly quiz (template ID = `{{weeklyQuizTemplateId}}`) is due on appropriate days (e.g., day 7, 14, etc., of the program).
 
-### 4.2. Check Trial Status
-Kiểm tra thời hạn dùng thử.
-**Endpoint:** `GET /api/programs/{id}/trial-status`
-**Auth:** `X-User-Id` (Owner)
+### Step 2: Open & Submit Weekly Quiz
+**Trigger Badge: Quiz Level 1 (Tự Nhận Thức)**
+*   **Method:** `POST`, **URL:** `{{baseUrl}}/v1/me/quizzes/{{weeklyQuizTemplateId}}/open`
+*   **Save:** `attemptId` from response.
+*   **Method:** `POST`, **URL:** `{{baseUrl}}/v1/me/quizzes/{{attemptId}}/submit`
+*   **Verify:**
+    *   Response shows `totalScore` and `severity`.
+    *   **Badge Check:** Call `GET {{baseUrl}}/api/me/badges`. User should have `QUIZ_LV1` badge.
 
-### 4.3. Upgrade from Trial (Admin/Payment)
-Mở khóa tính năng trả phí.
-**Endpoint:** `POST /api/programs/{id}/upgrade-from-trial`
-**Auth:** `ROLE_ADMIN`
-
----
-
-## 5. Daily User Flow
-
-### 5.1. Dashboard
-**Endpoint:** `GET /api/me`
-
-### 5.2. Get Steps Today
-**Endpoint:** `GET /api/programs/{programId}/steps/today`
-
-### 5.3. Update Step Status (Hoàn thành nhiệm vụ)
-User hoàn thành một bài tập thở hoặc đọc bài viết.
-**Endpoint:** `PATCH /api/programs/{programId}/steps/{stepId}/status`
-**Auth:** `X-User-Id`
-
-**Body:**
-```json
-{
-  "status": "COMPLETED",
-  "note": "Đã đọc xong bài viết và thực hiện bài tập thở trong 5 phút. Cảm thấy nhịp tim ổn định hơn."
-}
-```
+### Step 3: Submit 2nd & 3rd Weekly Quiz
+**Trigger Badge: Quiz Level 2 (Tiến Triển Tốt) & Level 3 (Làm Chủ)**
+*   **Scenario A: Improve/Maintain Performance (for QUIZ_LV2)**
+    1.  Wait 7 days (simulate by manipulating program `currentDay` or `program.startDate` in DB for quick test).
+    2.  List Due Quizzes, Open, Submit the 2nd weekly quiz. Ensure score is *lower or equal* than the 1st quiz.
+    3.  **Badge Check:** Call `GET {{baseUrl}}/api/me/badges`. User should have `QUIZ_LV2` badge.
+*   **Scenario B: Master Performance (for QUIZ_LV3)**
+    1.  Continue taking quizzes until the "last quiz" (e.g., in the last week of the program).
+    2.  Ensure this last quiz results in `Severity: LOW`.
+    3.  **Badge Check:** Call `GET {{baseUrl}}/api/me/badges`. User should have `QUIZ_LV3` badge.
 
 ---
 
-## 6. Quiz Execution Flow (Weekly Check-in)
+## 4. Core Flow: Program Milestone Badges
 
-### 6.1. List Due Quizzes
-**Endpoint:** `GET /v1/me/quizzes`
+### Scenario 1: Earn Program Level 2 (Kiên Trì - Halfway)
+*   **Trigger:** User viewing dashboard (`GET /api/me`) or checking progress (`GET /api/programs/{{programId}}/progress`).
+*   **Action:** Simulate program progress.
+    1.  Get `programId` from enrollment. Get `planDays` from program details.
+    2.  Manually update `currentDay` in DB: `UPDATE program.programs SET current_day = <planDays/2> WHERE id = '{{programId}}';`
+    3.  Call `GET {{baseUrl}}/api/me` or `GET {{baseUrl}}/api/programs/{{programId}}/progress`.
+*   **Verify:** User has `PROG_LV2` badge.
 
-### 6.2. Open Attempt
-**Endpoint:** `POST /v1/me/quizzes/{templateId}/open`
+### Scenario 2: Earn Program Level 3 (Về Đích - Completed)
+*   **Trigger:** Program status becomes `COMPLETED`.
+*   **Action:**
+    1.  Manually update `currentDay` in DB to `program.planDays`.
+    2.  Call `POST {{baseUrl}}/api/programs/{{programId}}/end` to explicitly complete the program.
+*   **Verify:** User has `PROG_LV3` badge.
 
-### 6.3. Answer Question
-**Endpoint:** `PUT /v1/me/quizzes/{attemptId}/answer`
-**Body:**
-```json
-{
-  "questionNo": 1,
-  "answer": 2
-}
-```
-
-### 6.4. Submit Quiz
-**Endpoint:** `POST /v1/me/quizzes/{attemptId}/submit`
-
----
-
-## 7. Tracking Flow (Smoke Events & Streaks)
-
-### 7.1. Log Smoke Event - SLIP (Lỡ hút)
-User báo cáo việc lỡ hút thuốc.
-**Endpoint:** `POST /api/programs/{programId}/smoke-events`
-**Body:**
-```json
-{
-  "eventType": "SMOKE",
-  "kind": "SLIP", 
-  "puffs": 3,
-  "reason": "SOCIAL",
-  "note": "Đi đám cưới bạn cũ, bị mời nhiệt tình quá nên hút vài hơi xã giao.",
-  "eventAt": "2025-12-02T20:30:00Z",
-  "occurredAt": "2025-12-02T20:30:00Z"
-}
-```
-
-### 7.2. Get Streak History
-Xem lịch sử các chuỗi đã đạt được.
-**Endpoint:** `GET /api/programs/{programId}/streak/history`
+### Edge Case: Paused Program (NO Badges)
+1.  Start a program. Verify `PROG_LV1` is awarded.
+2.  Call `POST {{baseUrl}}/api/programs/{{programId}}/pause`.
+3.  Manually update `currentDay` in DB to past `planDays/2`.
+4.  Call `GET {{baseUrl}}/api/me`.
+5.  **Verify:** User should *NOT* have `PROG_LV2` badge because `program.has_paused` is true.
 
 ---
 
-## 8. Subscription Flow
+## 5. Core Flow: Streak Badges
 
-### 8.1. Get My Subscription
-Xem trạng thái gói hiện tại.
-**Endpoint:** `GET /api/subscriptions/me`
+### Step 1: Initial Streak (Lazy Check)
+*   **Action:** Ensure program has 0 `last_smoke_at` (new program).
+*   **Action:** Call `GET {{baseUrl}}/api/me`.
+*   **Verify:** In `streakInfo`, `daysWithoutSmoke` should be > 0. User should NOT have any Streak badges yet.
 
-### 8.2. Upgrade to PREMIUM
-**Endpoint:** `POST /api/subscriptions/upgrade`
-**Body:**
-```json
-{
-  "targetTier": "PREMIUM"
-}
-```
+### Step 2: Earn Streak Level 1 (Tuần Lễ Vàng - 7 days)
+*   **Action:** Simulate 7 days without smoking.
+    1.  Manually update `program.start_date` in DB to 7 days ago.
+    2.  Manually ensure `program.last_smoke_at` is NULL or very old.
+    3.  Call `GET {{baseUrl}}/api/me`.
+*   **Verify:** User has `STREAK_LV1` badge.
+
+### Step 3: Earn Streak Level 2 (Thói Quen Mới - Half Program Days)
+*   **Action:** Simulate `planDays / 2` days without smoking.
+    1.  Manually update `program.start_date` in DB to `planDays/2` days ago.
+    2.  Manually ensure `program.last_smoke_at` is NULL or very old.
+    3.  Call `GET {{baseUrl}}/api/me`.
+*   **Verify:** User has `STREAK_LV2` badge.
+
+### Step 4: Earn Streak Level 3 (Chiến Binh Tự Do - Full Program Days)
+*   **Action:** Simulate `planDays` days without smoking.
+    1.  Manually update `program.start_date` in DB to `planDays` days ago.
+    2.  Manually ensure `program.last_smoke_at` is NULL or very old.
+    3.  Call `GET {{baseUrl}}/api/me`.
+*   **Verify:** User has `STREAK_LV3` badge.
+
+### Edge Case: Smoke Event (Break Streak)
+1.  Earn `STREAK_LV1`.
+2.  Log a smoke event: `POST {{baseUrl}}/api/programs/{{programId}}/smoke-events`.
+3.  Call `GET {{baseUrl}}/api/me`.
+4.  **Verify:** `daysWithoutSmoke` resets to 0. User *still has* `STREAK_LV1` (badges are permanent, not revoked).
+
+---
+
+## 6. Badge APIs
+
+### Step 1: Get All Badge Definitions
+*   **Method:** `GET`, **URL:** `{{baseUrl}}/api/me/badges/all`
+*   **Verify:**
+    *   Returns a Map grouped by category (PROGRAM, STREAK, QUIZ).
+    *   Contains all 9 badge definitions.
+
+### Step 2: Get My Earned Badges
+*   **Method:** `GET`, **URL:** `{{baseUrl}}/api/me/badges`
+*   **Verify:**
+    *   Returns only the badges earned by `{{userId}}`.
+    *   Each badge includes `code`, `name`, `iconUrl`, `earnedAt`.
+
+---

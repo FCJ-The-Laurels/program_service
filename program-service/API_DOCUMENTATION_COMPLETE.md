@@ -1,429 +1,219 @@
-# Program Service API Documentation
+# API Technical Documentation - Program Service (Frontend Integration)
 
-**Version:** 1.1.0
-**Last Updated:** 2025-12-02
-**Charset:** UTF-8
-
----
-
-## 1. Overview
-
-This document provides a complete reference for the Program Service API. The service is responsible for managing user programs, content, progress tracking, and related functionalities.
-
-### 1.1. Base URL
-
-All API endpoints are relative to the service's base URL.
-
--   **Production:** `https://api.smokefree.app/program`
--   **Development:** `http://localhost:8080`
-
-### 1.2. Authentication
-
-All requests must be authenticated via the API Gateway. The following headers are required on all incoming requests:
-
-| Header          | Description                                     | Example                                |
-| --------------- | ----------------------------------------------- | -------------------------------------- |
-| `Authorization` | Bearer token for authentication.                | `Bearer <JWT_TOKEN>`                   |
-| `X-User-Id`     | The UUID of the authenticated user.             | `a1b2c3d4-e5f6-7890-1234-567890abcdef` |
-| `X-User-Role`   | The role of the authenticated user.             | `USER`, `COACH`, or `ADMIN`            |
-| `X-User-Tier`   | The tier of the authenticated user (Optional).  | `BASIC`, `PREMIUM`, or `VIP`           |
-
-### 1.3. User Roles
-
-| Role    | Permissions                                                              |
-| ------- | ------------------------------------------------------------------------ |
-| `ADMIN` | Full access to all resources for management and administration.          |
-| `COACH` | Read-only access to data of assigned users/programs.                     |
-| `USER`  | Access to their own data only (programs, steps, quizzes, etc.).          |
-
-### 1.4. Common HTTP Status Codes
-
-| Code  | Status                 | Description                                                                 |
-| ----- | ---------------------- | --------------------------------------------------------------------------- |
-| `200` | OK                     | The request was successful.                                                 |
-| `201` | Created                | The resource was successfully created.                                      |
-| `400` | Bad Request            | The request was malformed (e.g., invalid JSON, missing parameters).         |
-| `401` | Unauthorized           | Authentication failed or was not provided.                                  |
-| `402` | Payment Required       | The requested action requires a subscription (e.g., trial has expired).     |
-| `403` | Forbidden              | The authenticated user does not have permission to access this resource.    |
-| `404` | Not Found              | The requested resource could not be found.                                  |
-| `409` | Conflict               | The request could not be completed due to a conflict (e.g., duplicate item).|
+**Version:** 2.2 (Badge System & Optimization Update)
+**Last Updated:** 2025-12-04
+**Status:** Ready for Integration
 
 ---
 
-## 2. Onboarding & Enrollment
+## 1. General Conventions
 
-Handles the initial user onboarding and program enrollment flows.
+### 1.1. Environment & Base URL
+*   **Dev:** `http://localhost:8080`
+*   **Prod:** `https://api.smokefree.app/program`
 
-### `POST /api/onboarding/baseline`
+### 1.2. Authentication Headers
+All requests (except `Health Check`) **MUST** include the following headers to identify the user context:
 
-Submits the user's baseline assessment answers and receives a program recommendation.
+| Header | Required | Description | Example |
+| :--- | :---: | :--- | :--- |
+| `Authorization` | ✅ | JWT Token (from Auth Service) | `Bearer eyJhbGci...` |
+| `X-User-Id` | ✅ | UUID of the logged-in user | `a1b2c3d4-e5f6-...` |
+| `X-User-Role` | ✅ | `CUSTOMER`, `COACH`, `ADMIN` | `CUSTOMER` |
+| `X-User-Tier` | ⬜ | `BASIC`, `PREMIUM`, `VIP` (Default: BASIC) | `PREMIUM` |
 
--   **Permissions:** `USER`
--   **Request Body:** `QuizAnswerReq`
-    ```json
-    {
-      "templateId": "uuid-of-template",
-      "answers": [
-        { "q": 1, "score": 4 }, // Question number and score
-        { "q": 2, "score": 3 }
-      ]
-    }
-    ```
--   **Success Response (200 OK):** `BaselineResultRes`
-    ```json
-    {
-      "totalScore": 35,
-      "severity": "HIGH", // LOW, MODERATE, HIGH
-      "recommendedTemplateId": "uuid-of-high-severity-plan",
-      "recommendedTemplateCode": "PLAN_HIGH_30D",
-      "options": [ 
-        {
-          "id": "uuid-of-low-severity-plan",
-          "code": "PLAN_LOW_30D",
-          "name": "30-Day Light Program",
-          "totalDays": 30,
-          "recommended": false
-        }
-      ]
-    }
-    ```
-
-### `GET /api/onboarding/baseline/quiz`
-
-Retrieves the questions for the onboarding assessment.
-
--   **Permissions:** `USER`
--   **Success Response (200 OK):** `OpenAttemptRes`
-    ```json
-    {
-      "attemptId": null, // Null for baseline preview
-      "templateId": "uuid-of-template",
-      "version": 1,
-      "questions": [
-        {
-          "questionNo": 1,
-          "questionText": "How soon...",
-          "choices": {
-            "A": "Within 5 min",
-            "B": "6-30 min"
-          }
-        }
-      ]
-    }
-    ```
+### 1.3. Timezone Handling
+*   **Server:** Always returns and accepts time in **ISO-8601 UTC** format (e.g., `2025-12-04T10:30:00Z`).
+*   **Frontend:** Responsible for converting UTC to the user's Local Time for display.
+*   **Streak Note:** The number of `daysWithoutSmoke` is calculated based on UTC at the server side. Frontend should **NOT** recalculate this based on local time to avoid data inconsistency.
 
 ---
 
-## 3. Programs
+## 2. Dashboard & Overview (Home Screen)
 
-Endpoints for managing user programs.
+### 2.1. Get Aggregated Dashboard
+This API is designed as an "Aggregator", returning all necessary data to render the Home screen in a single request.
 
-### 3.1. User-Facing Endpoints (`/v1/programs`)
+*   **Method:** `GET`
+*   **Path:** `/api/me`
+*   **Response Structure:**
 
-### `POST /v1/programs`
-
-Creates a new program for the user.
-
--   **Permissions:** `USER`
--   **Request Body:** `CreateProgramReq`
-    ```json
+```json
+{
+  "userId": "uuid",
+  "subscription": {
+    "tier": "BASIC",
+    "status": "ACTIVE",
+    "expiresAt": null
+  },
+  "activeProgram": {
+    "id": "uuid",
+    "templateCode": "PLAN_30_DAYS",
+    "templateName": "30-Day Basic Plan",
+    "status": "ACTIVE", // ACTIVE, PAUSED, COMPLETED
+    "currentDay": 5,
+    "planDays": 30,
+    "isTrial": true,
+    "trialRemainingDays": 2, // Null if Paid user
+    "createdAt": "2025-12-01T10:00:00Z"
+  },
+  "dueQuizzes": [ // List of quizzes that require immediate attention
     {
-      "planDays": 30,
-      "coachId": "optional-uuid"
+      "templateId": "uuid",
+      "templateName": "Weekly Check-in 1",
+      "dueAt": "2025-12-04T00:00:00Z",
+      "isOverdue": false
     }
-    ```
--   **Success Response (200 OK):** `ProgramRes`
-    ```json
-    {
-      "id": "uuid-of-new-program",
-      "status": "ACTIVE", // ACTIVE, PAUSED, COMPLETED, CANCELLED
-      "planDays": 30,
-      "startDate": "2025-11-28",
-      "currentDay": 1,
-      "severity": "HIGH",
-      "totalScore": 0,
-      "entitlements": {
-        "tier": "BASIC",
-        "features": []
-      },
-      "access": {
-        "entState": "ACTIVE",
-        "entExp": "2026-11-28T10:00:00Z",
-        "tier": "BASIC"
-      }
-    }
-    ```
+  ],
+  "streakInfo": {
+    "currentStreak": 5,       // Current consecutive streak days
+    "longestStreak": 5,       // Personal best record
+    "daysWithoutSmoke": 5     // Total smoke-free days (UTC based)
+  }
+}
+```
 
-### `GET /v1/programs/active`
-
-Retrieves the user's currently active program.
-
--   **Permissions:** `USER`
--   **Success Response (200 OK):** `ProgramRes` (same structure as above)
--   **Error Response:** `402 Payment Required` if the user's trial has expired.
-
-### 3.2. Management Endpoints (`/api/programs`)
-
-### `GET /api/programs/{id}/progress`
-
-Retrieves detailed progress metrics.
-
--   **Permissions:** `USER` (owner)
--   **Path Parameters:** `id` (UUID)
--   **Success Response (200 OK):** `ProgramProgressRes`
-    ```json
-    {
-      "id": "uuid-of-program",
-      "status": "ACTIVE",
-      "currentDay": 15,
-      "planDays": 30,
-      "percentComplete": 50.0,
-      "daysRemaining": 15,
-      "stepsCompleted": 5,
-      "stepsTotal": 10,
-      "streakCurrent": 10,
-      "trialRemainingDays": 5 // Null if not trial
-    }
-    ```
-
-### `POST /api/programs/{id}/pause`
-### `POST /api/programs/{id}/resume`
-### `POST /api/programs/{id}/end`
-
-Changes program status.
-
--   **Permissions:** `USER` (owner)
--   **Success Response (200 OK):** `ProgramRes`
-
-### `GET /api/programs/{id}/trial-status`
-
-Checks if the program is in trial period.
-
--   **Permissions:** `USER` (owner)
--   **Success Response (200 OK):** `TrialStatusRes`
-    ```json
-    {
-      "isTrial": true,
-      "trialStartedAt": "...",
-      "trialEndExpected": "...",
-      "remainingDays": 2,
-      "canUpgradeNow": true
-    }
-    ```
+*   **Frontend Logic:**
+    *   If `activeProgram` is `null`: Show "Start Journey" (Onboarding) screen.
+    *   If `activeProgram.status` is `PAUSED`: Show a warning banner with a "Resume" button.
+    *   If `trialRemainingDays <= 0` and `isTrial=true`: Show a mandatory Payment Modal (Hard Stop).
+    *   Check `dueQuizzes`: If the array is not empty, show a red dot notification or a reminder popup.
 
 ---
 
-## 4. Plan Templates & Content
+## 3. Badge System - **NEW**
 
-### 4.1. Plan Templates (`/api/plan-templates`)
+### 3.1. Get My Earned Badges
+Retrieves the list of badges the user has earned. Should be called when the user visits the Profile or Dashboard (Lazy load).
 
-### `GET /api/plan-templates`
+*   **Method:** `GET`
+*   **Path:** `/api/me/badges`
+*   **Response:** Array of earned badges.
 
-Lists all plan templates.
+```json
+[
+  {
+    "code": "PROG_LV1",
+    "category": "PROGRAM",
+    "level": 1,
+    "name": "Start Journey",
+    "description": "Started the smoke-free journey.",
+    "iconUrl": "assets/badges/prog_lv1.png",
+    "earnedAt": "2025-12-01T10:00:00Z"
+  },
+  {
+    "code": "STREAK_LV1",
+    "category": "STREAK",
+    "level": 1,
+    "name": "Golden Week",
+    "description": "Achieved a 7-day smoke-free streak.",
+    "iconUrl": "assets/badges/streak_lv1.png",
+    "earnedAt": "2025-12-08T10:00:00Z"
+  }
+]
+```
 
--   **Permissions:** `Authenticated`
--   **Success Response (200 OK):** `List<PlanTemplateSummaryRes>`
+### 3.2. Get All Badge Definitions
+Used to display the "Collection" view (unearned badges should be greyed out).
 
-### `GET /api/plan-templates/{id}`
+*   **Method:** `GET`
+*   **Path:** `/api/me/badges/all`
+*   **Response:** Map grouped by Category (`PROGRAM`, `STREAK`, `QUIZ`).
 
-Gets details of a plan template.
+```json
+{
+  "PROGRAM": [
+    { "code": "PROG_LV1", "level": 1, "name": "Start Journey", ... },
+    { "code": "PROG_LV2", "level": 2, "name": "Perseverance", ... }
+  ],
+  "STREAK": [...]
+}
+```
 
--   **Permissions:** `Authenticated`
--   **Success Response (200 OK):** `PlanTemplateDetailRes`
-
-### `GET /api/plan-templates/by-code/{code}/days`
-
-Gets the daily schedule for a template code.
-
--   **Permissions:** `Authenticated`
--   **Query Params:** `expand` (boolean), `lang` (string)
--   **Success Response (200 OK):** `PlanDaysRes`
-
-### 4.2. Content Modules (`/api/modules`)
-
-### `POST /api/modules` (Admin)
-
-Creates content (Article/Video/etc).
-
--   **Permissions:** `ADMIN`
--   **Request Body:** `ContentModuleCreateReq`
-    ```json
-    {
-      "code": "ARTICLE_001",
-      "type": "ARTICLE",
-      "lang": "vi",
-      "payload": { "title": "...", "content": "..." }
-    }
-    ```
--   **Success Response (201 Created):** `ContentModuleRes`
-    ```json
-    {
-      "id": "uuid",
-      "code": "ARTICLE_001",
-      "type": "ARTICLE",
-      "lang": "vi",
-      "version": 1,
-      "payload": { ... },
-      "updatedAt": "...",
-      "etag": "..."
-    }
-    ```
-
-### `GET /api/modules` (Search)
-
--   **Permissions:** `ADMIN`
--   **Query Params:** `q`, `lang`, `page`, `size`
--   **Success Response:** `Page<ContentModuleRes>`
-
-### `GET /api/modules/by-code/{code}`
-
--   **Permissions:** Public/Authenticated
--   **Success Response:** `ContentModuleRes`
+*   **UI Rendering Rules:**
+    *   Compare `all` list with `earned` list.
+    *   If the user does NOT have the badge -> Render Grayscale Icon + Lock overlay.
+    *   If the user HAS the badge -> Render Color Icon.
 
 ---
 
-## 5. Daily Execution
+## 4. Program Management (Lifecycle)
 
-### 5.1. Steps (`/api/programs/{programId}/steps`)
-
-### `GET /today`
-
-Gets steps for the current day.
-
--   **Permissions:** `USER`
--   **Success Response (200 OK):** `List<StepAssignment>`
-
-### `PATCH /{id}/status`
-
-Updates step status (e.g., COMPLETED).
-
--   **Permissions:** `USER`
--   **Request Body:** `UpdateStepStatusReq`
+### 4.1. Create Program (Enrollment)
+*   **Method:** `POST`
+*   **Path:** `/v1/programs`
+*   **Body:**
     ```json
     {
-      "status": "COMPLETED",
-      "note": "Optional note"
+      "planTemplateId": "uuid-from-onboarding",
+      "trial": true // true: 7-day trial
     }
     ```
--   **Success Response (200 OK):** (Empty Body)
+*   **Impact:**
+    *   Automatically awards **Start Journey (PROG_LV1)** badge.
+    *   System automatically assigns daily Steps and Quizzes schedules.
 
-### 5.2. Smoke Events (`/api/programs/{programId}/smoke-events`)
+### 4.2. Pause Program
+*   **Method:** `POST`
+*   **Path:** `/api/programs/{id}/pause`
+*   **User Warning:** "Pausing your journey will **disqualify you from earning 'Perseverance' and 'Finisher' badges**. Are you sure?"
+    *   *Backend Logic:* The `hasPaused` flag is permanently set to `true` for this program.
 
-### `POST /`
+### 4.3. Resume Program
+*   **Method:** `POST`
+*   **Path:** `/api/programs/{id}/resume`
 
-Logs a smoke event.
-
--   **Permissions:** `USER`
--   **Request Body:** `CreateSmokeEventReq`
-    ```json
-    {
-      "eventType": "SMOKE", // SMOKE, URGE
-      "kind": "SLIP",       // SLIP, LAPSE, RELAPSE, STRONG...
-      "puffs": 3,
-      "reason": "STRESS",
-      "note": "...",
-      "eventAt": "ISO-8601",
-      "occurredAt": "ISO-8601"
-    }
-    ```
--   **Success Response (200 OK):** `SmokeEventRes`
-
-### `GET /history`
-
--   **Query Params:** `size` (int)
--   **Success Response:** `List<SmokeEventRes>`
-
-### 5.3. Streaks (`/api/programs/{programId}/streak`)
-
-### `GET /`
-
-Gets current streak info.
-
--   **Success Response (200 OK):** `StreakView`
-    ```json
-    {
-      "streakId": "uuid",
-      "currentStreak": 5,        // Days
-      "bestStreak": 10,
-      "daysWithoutSmoke": 5,
-      "startedAt": "...",
-      "endedAt": null
-    }
-    ```
+### 4.4. End Program (Early Finish)
+*   **Method:** `POST`
+*   **Path:** `/api/programs/{id}/end`
+*   **Impact:**
+    *   If `hasPaused == false`: Awards **Finisher (PROG_LV3)** badge.
+    *   Status changes to `COMPLETED`.
 
 ---
 
-## 6. Quiz Engine
+## 5. Steps & Quiz Engine
 
-### 6.1. Admin Quiz (`/v1/admin/quizzes`)
+### 5.1. List Due Quizzes
+*   **Method:** `GET`
+*   **Path:** `/v1/me/quizzes`
+*   **Response:** List of quizzes currently open (`isOverdue` calculated based on deadline).
 
--   `POST /`: Create Template
--   `POST /{id}/publish`: Publish Template
--   `POST /{id}/questions`: Add Question
+### 5.2. Quiz Execution Flow
+1.  **Open Attempt:** `POST /v1/me/quizzes/{templateId}/open` -> Returns `attemptId`.
+2.  **Answer (Optional - Auto save):** `PUT /v1/me/quizzes/{attemptId}/answer`.
+3.  **Submit:** `POST /v1/me/quizzes/{attemptId}/submit`.
 
-### 6.2. User Quiz (`/v1/me/quizzes`)
-
-### `GET /` (List Due)
-
-Lists quizzes assigned to the user (Weekly, Assessment, Recovery).
-
--   **Success Response:** `Map<String, Object>`
-    ```json
-    {
-      "success": true,
-      "data": [
-        { "attemptId": null, "templateId": "...", "type": "WEEKLY", "deadline": "..." }
-      ],
-      "count": 1
-    }
-    ```
-
-### `POST /{templateId}/open`
-
-Starts a quiz attempt.
-
--   **Success Response:** `OpenAttemptRes` (Contains questions)
-
-### `PUT /{attemptId}/answer`
-
-Saves an answer.
-
--   **Request Body:** `AnswerReq`
-    ```json
-    { "questionNo": 1, "answer": 2 }
-    ```
--   **Success Response:** `{ "success": true, "message": "..." }`
-
-### `POST /{attemptId}/submit`
-
-Submits and scores the quiz.
-
--   **Success Response:**
-    ```json
-    {
-      "success": true,
-      "data": {
-        "attemptId": "uuid",
-        "totalScore": 10,
-        "severity": "LOW"
-      }
-    }
-    ```
+*   **Post-Submit Impact:**
+    *   System calculates score and severity.
+    *   Checks for **Quiz Progress Badges** (Level 1, 2, 3) immediately. If earned, Badge API will reflect this on next call.
 
 ---
 
-## 7. Subscription
+## 6. Tracking (Smoke & Streak)
 
-### `GET /api/subscriptions/me`
+### 6.1. Log Smoke Event (Slip/Relapse)
+*   **Method:** `POST`
+*   **Path:** `/api/programs/{id}/smoke-events`
+*   **Body:**
+    ```json
+    {
+      "eventType": "SMOKE",
+      "eventAt": "2025-12-04T10:00:00Z"
+    }
+    ```
+*   **Consequence:**
+    *   `currentStreak` resets to 0.
+    *   User retains previously earned Streak Badges (Badges are permanent).
 
-Gets current subscription status.
+---
 
--   **Success Response:** `SubscriptionStatusRes` (Mocked)
+## 7. Common Error Codes
 
-### `POST /api/subscriptions/upgrade`
-
-Upgrades tier.
-
--   **Request Body:** `{ "targetTier": "PREMIUM" }`
--   **Success Response:** `SubscriptionStatusRes`
+| HTTP Code | Frontend Handling | Suggested Action |
+| :--- | :--- | :--- |
+| `400 Bad Request` | `ValidationException` | Show specific form input error messages. |
+| `402 Payment Required` | `Trial expired` | **Block Interaction**. Show Premium Upgrade Modal. |
+| `403 Forbidden` | `Access denied` | User attempting to access unauthorized resource. Redirect to Home. |
+| `409 Conflict` | `Program not active` | User acting on old/paused program state. Refresh to get latest state. |
+| `409 Conflict` | `Quiz not due` | User trying to take a quiz too early. Show "Not open yet" message. |

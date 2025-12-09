@@ -83,4 +83,7 @@ public class Program {
 
     @Column(name = "streak_recovery_used_count", nullable = false)
     private int streakRecoveryUsedCount = 0;
+
+    @Column(name = "has_paused")
+    private boolean hasPaused = false;
 }

@@ -9,4 +9,5 @@ import java.util.*;
 public interface StreakRepository extends JpaRepository<Streak, UUID> {
     Optional<Streak> findFirstByProgramIdAndEndedAtIsNullOrderByStartedAtDesc(UUID programId);
     List<Streak> findByProgramIdOrderByStartedAtDesc(UUID programId, Pageable pageable);
+    void deleteAllByProgramId(UUID programId);
 }

@@ -17,6 +17,16 @@ import java.time.temporal.ChronoUnit;
 import java.util.List;
 import java.util.UUID;
 
+/**
+ * Service implementation for User Dashboard logic.
+ * <p>
+ * Acts as an Aggregator that pulls data from:
+ * 1. Subscription Service (Tier info)
+ * 2. Program Service (Active program details)
+ * 3. Quiz Flow Service (Due quizzes)
+ * 4. Streak Service (Streak stats)
+ * </p>
+ */
 @Service
 @RequiredArgsConstructor
 @Slf4j
@@ -26,6 +36,7 @@ public class MeServiceImpl implements MeService {
     private final ProgramRepository programRepository;
     private final QuizFlowService quizFlowService;
     private final StreakService streakService;
+    private final BadgeService badgeService;
 
     @Override
     @Transactional(readOnly = true)
@@ -81,7 +92,6 @@ public class MeServiceImpl implements MeService {
 
             // 4. Lấy quiz due
             try {
-                // ✅ FIX: quizFlowService.listDue() trả về List<DueItem>, cần convert sang List<DueQuizRes>
                 var dueItems = quizFlowService.listDue(userId);
                 dueQuizzes = dueItems.stream()
                         .map(item -> new DueQuizRes(
@@ -100,13 +110,19 @@ public class MeServiceImpl implements MeService {
             // 5. Lấy streak info
             try {
                 var streak = streakService.current(programEntity.getId());
+                int smokeFreeDays = streak.daysWithoutSmoke() != null ? streak.daysWithoutSmoke() : 0;
+                
+                // Lazy Check Badges (Streak + Milestone)
+                badgeService.checkProgramMilestone(programEntity);
+                badgeService.checkStreak(programEntity, smokeFreeDays);
+
                 streakInfo = new StreakInfoRes(
                         streak.currentStreak(),
                         programEntity.getStreakBest(),
-                        calculateDaysWithoutSmoke(programEntity)
+                        smokeFreeDays
                 );
                 log.info("[Dashboard] Streak - current: {}, best: {}, days: {}",
-                        streak.currentStreak(), programEntity.getStreakBest(), calculateDaysWithoutSmoke(programEntity));
+                        streak.currentStreak(), programEntity.getStreakBest(), smokeFreeDays);
             } catch (Exception e) {
                 log.warn("[Dashboard] Error getting streak info: {}", e.getMessage());
                 streakInfo = new StreakInfoRes(null, 0, 0);
@@ -124,31 +140,4 @@ public class MeServiceImpl implements MeService {
                 streakInfo
         );
     }
-
-    /**
-     * Helper: Tính daysWithoutSmoke
-     * - Nếu lastSmokeAt != null: tính từ lastSmokeAt
-     * - Nếu lastSmokeAt == null: tính từ startDate
-     */
-    private int calculateDaysWithoutSmoke(Program program) {
-        try {
-            if (program.getLastSmokeAt() != null) {
-                long days = ChronoUnit.DAYS.between(
-                    program.getLastSmokeAt().toLocalDate(),
-                    java.time.LocalDate.now()
-                );
-                return (int) Math.max(0, days);
-            } else {
-                long days = ChronoUnit.DAYS.between(
-                    program.getStartDate(),
-                    java.time.LocalDate.now()
-                );
-                return (int) Math.max(0, days);
-            }
-        } catch (Exception e) {
-            log.warn("[Dashboard] Error calculating daysWithoutSmoke: {}", e.getMessage());
-            return 0;
-        }
-    }
-
 }

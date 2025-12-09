@@ -211,7 +211,7 @@ public class StepAssignmentServiceImpl implements StepAssignmentService {
     }
 
     @Override
-    @Transactional(readOnly = true)
+    @Transactional
     public List<StepAssignment> listByProgramAndDate(UUID programId, LocalDate date) {
         ensureProgramAccess(programId, true);
         Program program = programRepository.findById(programId)
@@ -221,6 +221,15 @@ public class StepAssignmentServiceImpl implements StepAssignmentService {
         }
         long offset = ChronoUnit.DAYS.between(program.getStartDate(), date);
         int plannedDay = (int) offset + 1;
+
+        // Auto-update Current Day if we moved to a new day
+        if (plannedDay > program.getCurrentDay() && plannedDay <= program.getPlanDays()) {
+            log.info("[AutoUpdate] Updating currentDay from {} to {} for program {}",
+                     program.getCurrentDay(), plannedDay, programId);
+            program.setCurrentDay(plannedDay);
+            programRepository.save(program);
+        }
+
         if (plannedDay < 1) {
             return List.of();
         }

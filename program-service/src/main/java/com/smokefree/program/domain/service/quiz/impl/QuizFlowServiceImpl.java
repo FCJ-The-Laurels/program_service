@@ -37,11 +37,25 @@ public class QuizFlowServiceImpl implements QuizFlowService {
     private final StreakBreakRepository streakBreakRepository;
     private final StreakService streakService; // Thêm StreakService
     private final StreakRepository streakRepository;
+    private final com.smokefree.program.domain.service.BadgeService badgeService;
 
+    /**
+     * Retrieves the list of quizzes currently due for the user.
+     * <p>
+     * Optimization Strategy:
+     * 1. Fetch all active assignments for the program.
+     * 2. Bulk fetch all quiz results (Map: TemplateId -> Latest Result) to avoid N+1 queries.
+     * 3. Bulk fetch all quiz templates to avoid N+1 queries.
+     * 4. Process in-memory to determine due dates based on schedule (ONCE vs Recurring).
+     * </p>
+     *
+     * @param userId The ID of the user.
+     * @return List of due items sorted by schedule order and due date.
+     */
     @Override
     @Transactional(readOnly = true)
     public List<DueItem> listDue(UUID userId) {
-        log.info("[QuizFlow] listDue for userId: {}", userId);
+        log.info("[QuizFlow] listDue optimized for userId: {}", userId);
 
         Program program = programRepository
             .findFirstByUserIdAndStatusAndDeletedAtIsNull(userId, ProgramStatus.ACTIVE)
@@ -54,61 +68,95 @@ public class QuizFlowServiceImpl implements QuizFlowService {
         if (program.getTrialEndExpected() != null && Instant.now().isAfter(program.getTrialEndExpected())) {
             throw new com.smokefree.program.web.error.SubscriptionRequiredException("Trial expired");
         }
-        log.info("[QuizFlow] Found active program: {}, currentDay: {}", program.getId(), program.getCurrentDay());
 
-
+        // 1. Fetch all assignments
         List<QuizAssignment> assignments = quizAssignmentRepository.findActiveSortedByStartOffset(program.getId());
-        log.info("[QuizFlow] Found {} active assignments for program.", assignments.size());
-        
-        record DueCandidate(QuizAssignment assignment, DueItem item) {}
-        List<DueCandidate> result = new ArrayList<>();
+        if (assignments.isEmpty()) return List.of();
+
+        // 2. Bulk fetch all results (Map: TemplateId -> Latest Result)
+        Map<UUID, QuizResult> latestResultsMap = quizResultRepository.findByProgramId(program.getId())
+                .stream()
+                .collect(Collectors.toMap(
+                        QuizResult::getTemplateId,
+                        r -> r,
+                        (existing, replacement) -> existing.getCreatedAt().isAfter(replacement.getCreatedAt()) ? existing : replacement
+                ));
+
+        // 3. Bulk fetch all templates
+        Set<UUID> templateIds = assignments.stream()
+                .map(QuizAssignment::getTemplateId)
+                .collect(Collectors.toSet());
+        Map<UUID, QuizTemplate> templateMap = quizTemplateRepository.findAllById(templateIds)
+                .stream()
+                .collect(Collectors.toMap(QuizTemplate::getId, t -> t));
+
+        List<DueItem> result = new ArrayList<>();
         Instant now = Instant.now();
 
         for (var assignment : assignments) {
-            log.debug("[QuizFlow] Checking assignment for templateId: {}, origin: {}, startOffset: {}", 
-                      assignment.getTemplateId(), assignment.getOrigin(), assignment.getStartOffsetDay());
+            QuizTemplate template = templateMap.get(assignment.getTemplateId());
+            if (template == null) continue;
 
-            boolean isDue = isQuizDue(assignment, program, now);
-            log.debug("[QuizFlow] isQuizDue returned: {}", isDue);
+            QuizResult lastResult = latestResultsMap.get(assignment.getTemplateId());
+            boolean alreadyTaken = (lastResult != null);
 
+            // Logic check Due
+            Instant displayDueDate = calculateDisplayDueDateOptimized(assignment, program, lastResult);
+            boolean isDue = checkIsDueOptimized(assignment, program, now, displayDueDate);
 
             if (isDue) {
-                boolean alreadyTaken = quizResultRepository.existsByProgramIdAndTemplateId(program.getId(), assignment.getTemplateId());
-                log.debug("[QuizFlow] alreadyTaken check returned: {}", alreadyTaken);
-
-                
-                // Bỏ qua quiz ONCE đã làm, TRỪ KHI nó là quiz đặc biệt có thể làm lại
+                // Logic ONCE check
                 boolean isRepeatable = (assignment.getOrigin() == QuizAssignmentOrigin.STREAK_RECOVERY);
                 if (assignment.getScope() == AssignmentScope.ONCE && alreadyTaken && !isRepeatable) {
-                    log.info("[QuizFlow] Skipping non-repeatable ONCE quiz that is already taken. TemplateId: {}", assignment.getTemplateId());
                     continue;
                 }
 
-                QuizTemplate template = quizTemplateRepository.findById(assignment.getTemplateId()).orElse(null);
-                if (template != null) {
-                    Instant displayDueDate = calculateDisplayDueDate(assignment, program);
-                    boolean isOverdue = !displayDueDate.isAfter(now);
-                    log.info("[QuizFlow] Adding quiz to due list. TemplateId: {}", template.getId());
-                    result.add(new DueCandidate(
-                            assignment,
-                            new DueItem(template.getId(), template.getName(), displayDueDate, isOverdue)
-                    ));
-                } else {
-                    log.warn("[QuizFlow] QuizTemplate not found for assignment with templateId: {}", assignment.getTemplateId());
-                }
+                boolean isOverdue = !displayDueDate.isAfter(now);
+                result.add(new DueItem(template.getId(), template.getName(), displayDueDate, isOverdue));
             }
         }
 
         Set<UUID> seenTemplates = new HashSet<>();
-
         return result.stream()
                 .sorted(Comparator
-                        .comparing((DueCandidate c) -> Optional.ofNullable(c.assignment().getStartOffsetDay()).orElse(0))
-                        .thenComparing(c -> Optional.ofNullable(c.assignment().getOrderNo()).orElse(0))
-                        .thenComparing(c -> c.item().dueAt()))
-                .filter(c -> seenTemplates.add(c.assignment().getTemplateId())) // tránh trùng template
-                .map(DueCandidate::item)
+                        .comparing((DueItem i) -> i.dueAt())
+                )
+                .filter(i -> seenTemplates.add(i.templateId()))
                 .toList();
+    }
+
+    private boolean checkIsDueOptimized(QuizAssignment assignment, Program program, Instant now, Instant dueDate) {
+        int startOffset = Optional.ofNullable(assignment.getStartOffsetDay()).orElse(0);
+        if (startOffset > 0 && program.getCurrentDay() < startOffset) {
+            return false;
+        }
+        int interval = Optional.ofNullable(assignment.getEveryDays()).orElse(0);
+        if (interval > 0) {
+            return !dueDate.isAfter(now);
+        }
+        return true;
+    }
+
+    private Instant calculateDisplayDueDateOptimized(QuizAssignment assignment, Program program, QuizResult lastResult) {
+        int startOffset = Optional.ofNullable(assignment.getStartOffsetDay()).orElse(0);
+        int intervalDays = Optional.ofNullable(assignment.getEveryDays()).orElse(0);
+
+        if (intervalDays > 0) {
+            Instant lastDate = (lastResult != null) ? lastResult.getCreatedAt() : program.getStartDate().atStartOfDay(ZoneOffset.UTC).toInstant();
+            int everyDays = intervalDays > 0 ? intervalDays : 7;
+            Instant candidate = lastDate.plus(Duration.ofDays(everyDays));
+
+            if (startOffset > 0) {
+                Instant earliest = program.getStartDate().plusDays(startOffset - 1).atStartOfDay(ZoneOffset.UTC).toInstant();
+                return candidate.isBefore(earliest) ? earliest : candidate;
+            }
+            return candidate;
+        }
+
+        if (startOffset > 0) {
+            return program.getStartDate().plusDays(startOffset - 1).atStartOfDay(ZoneOffset.UTC).toInstant();
+        }
+        return program.getStartDate().atStartOfDay(ZoneOffset.UTC).toInstant();
     }
 
     private boolean isQuizDue(QuizAssignment assignment, Program program, Instant now) {
@@ -296,6 +344,10 @@ public class QuizFlowServiceImpl implements QuizFlowService {
         attempt.setStatus(AttemptStatus.SUBMITTED);
         attempt.setSubmittedAt(Instant.now());
         quizAttemptRepository.save(attempt);
+
+        // Check Quiz Badges
+        programRepository.findById(attempt.getProgramId())
+                .ifPresent(badgeService::checkQuizProgress);
 
         // === LOGIC NGHIỆP VỤ ĐẶC BIỆT: XỬ LÝ SAU KHI NỘP QUIZ ===
         handlePostSubmissionActions(attempt);

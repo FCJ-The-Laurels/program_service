@@ -157,7 +157,10 @@ public class SmokeEventServiceImpl implements SmokeEventService {
         ensureProgramAccess(programId, true);
         List<SmokeEvent> allEvents = smokeEventRepository.findByProgramIdOrderByEventAtDesc(programId);
 
-        LocalDate cutoffDate = LocalDate.now();
+        // Fix Timezone: Use UTC
+        LocalDate nowUtc = LocalDate.now(ZoneOffset.UTC);
+        LocalDate cutoffDate = nowUtc;
+        
         if ("WEEK".equals(period)) {
             cutoffDate = cutoffDate.minusWeeks(1);
         } else if ("MONTH".equals(period)) {
@@ -170,7 +173,8 @@ public class SmokeEventServiceImpl implements SmokeEventService {
             .toList();
 
         int totalCount = filteredEvents.size();
-        double avgPerDay = totalCount > 0 ? (double) totalCount / Math.max(1, ChronoUnit.DAYS.between(cutoffDate, LocalDate.now())) : 0.0;
+        // Fix Timezone: Use UTC for duration calculation too
+        double avgPerDay = totalCount > 0 ? (double) totalCount / Math.max(1, ChronoUnit.DAYS.between(cutoffDate, nowUtc)) : 0.0;
 
         return new SmokeEventStatisticsRes(
             totalCount,

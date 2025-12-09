@@ -41,4 +41,7 @@ public interface StepAssignmentRepository extends JpaRepository<StepAssignment, 
      */
     @Query("SELECT COUNT(s) FROM StepAssignment s WHERE s.programId = :programId AND s.plannedDay = :plannedDay AND s.status <> :status")
     long countIncompleteStepsForDay(@Param("programId") UUID programId, @Param("plannedDay") int plannedDay, @Param("status") StepStatus status);
+
+    long countByProgramId(UUID programId);
+    long countByProgramIdAndStatus(UUID programId, StepStatus status);
 }
