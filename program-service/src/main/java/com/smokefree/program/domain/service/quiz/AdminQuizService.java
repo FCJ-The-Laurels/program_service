@@ -23,6 +23,7 @@ public interface AdminQuizService {
 
     void deleteTemplate(UUID templateId);
 
+    void revertToDraft(UUID templateId);
     /**
      * Cập nhật lại nội dung (câu hỏi/lựa chọn), giữ nguyên metadata.
      */

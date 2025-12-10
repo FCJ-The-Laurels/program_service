@@ -21,6 +21,7 @@ import java.time.ZoneOffset;
 import java.time.temporal.ChronoUnit;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.UUID;
 
 @Service
@@ -33,7 +34,8 @@ public class StepAssignmentServiceImpl implements StepAssignmentService {
     private final ProgramRepository programRepository;
     private final StreakService streakService;
     private final ContentModuleRepository contentModuleRepo;
-    private final StreakRepository streakRepo; // Thêm dependency này
+    private final StreakRepository streakRepo;
+    private final com.smokefree.program.domain.service.BadgeService badgeService;
 
     /**
      * Tạo một nhiệm vụ phục hồi streak đặc biệt, được kích hoạt sau một sự kiện SLIP.
@@ -151,9 +153,18 @@ public class StepAssignmentServiceImpl implements StepAssignmentService {
             program.setStreakBest(program.getStreakCurrent());
         }
 
+        // === LOGIC MỚI: Tự động hoàn thành Program khi xong ngày cuối ===
+        if (plannedDay >= program.getPlanDays() && program.getStatus() == ProgramStatus.ACTIVE) {
+            log.info("[DayCompletion] Program {} reached the final day ({}). Marking as COMPLETED.",
+                    programId, plannedDay);
+            program.setStatus(ProgramStatus.COMPLETED);
+            // Trigger check badge ngay lập tức để user nhận huy hiệu "Về đích"
+            badgeService.checkProgramMilestone(program);
+        }
+
         programRepository.save(program);
-        log.info("Successfully updated streak for program {}. New current: {}, New best: {}",
-                 programId, program.getStreakCurrent(), program.getStreakBest());
+        log.info("Successfully updated streak and status for program {}. New current: {}, Status: {}",
+                 programId, program.getStreakCurrent(), program.getStatus());
     }
 
     @Deprecated   private void handleDayCompletionLegacy(UUID programId, int plannedDay) {
@@ -287,16 +298,36 @@ public class StepAssignmentServiceImpl implements StepAssignmentService {
         List<PlanStep> templateSteps = planStepRepository.findByTemplateIdOrderByDayNoAscSlotAsc(template.getId());
         log.info("[StepAssignment] Creating {} step assignments for program: {}", templateSteps.size(), program.getId());
         int stepNo = 1;
+        final String lang = "vi"; // Giả định ngôn ngữ mặc định
+
         for (PlanStep planStep : templateSteps) {
-            StepAssignment assignment = StepAssignment.builder()
-                .id(UUID.randomUUID())
-                .programId(program.getId())
-                .stepNo(stepNo++)
-                .plannedDay(planStep.getDayNo())
-                .status(StepStatus.PENDING)
-                .assignmentType(StepAssignment.AssignmentType.REGULAR)
-                .createdBy(program.getUserId())
-                .build();
+            StepAssignment.StepAssignmentBuilder assignmentBuilder = StepAssignment.builder()
+                    .id(UUID.randomUUID())
+                    .programId(program.getId())
+                    .stepNo(stepNo++)
+                    .plannedDay(planStep.getDayNo())
+                    .status(StepStatus.PENDING)
+                    .assignmentType(StepAssignment.AssignmentType.REGULAR)
+                    .createdBy(program.getUserId())
+                    .moduleCode(planStep.getModuleCode()) // Vẫn giữ module_code
+                    .titleOverride(planStep.getTitle());
+
+            // === LOGIC MỚI ĐỂ "ĐÓNG BĂNG" PHIÊN BẢN ===
+            if (planStep.getModuleCode() != null && !planStep.getModuleCode().isBlank()) {
+                Optional<ContentModule> latestModuleOpt = contentModuleRepo
+                        .findTopByCodeAndLangOrderByVersionDesc(planStep.getModuleCode(), lang);
+
+                if (latestModuleOpt.isPresent()) {
+                    ContentModule latestModule = latestModuleOpt.get();
+                    assignmentBuilder.moduleVersion(String.valueOf(latestModule.getVersion()));
+                } else {
+                    log.warn("Could not find content module with code '{}' and lang '{}' while creating step assignments for program {}. Version will be null.",
+                            planStep.getModuleCode(), lang, program.getId());
+                }
+            }
+            // === KẾT THÚC LOGIC MỚI ===
+
+            StepAssignment assignment = assignmentBuilder.build();
             LocalDate startDate = program.getStartDate();
             LocalDate scheduledDate = startDate.plusDays(planStep.getDayNo() - 1);
             assignment.setScheduledAt(scheduledDate.atStartOfDay(ZoneOffset.UTC).toOffsetDateTime());

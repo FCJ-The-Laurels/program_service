@@ -87,29 +87,29 @@ public class StreakServiceImpl implements StreakService {
     @Override
     @Transactional
     public StreakView breakStreak(UUID programId, OffsetDateTime brokenAt, UUID smokeEventId, String note) {
-        StreakBreak breakRecord = breakStreakAndLog(programId, brokenAt, smokeEventId, note);
+        // SỬA LỖI: Truyền `null` cho tham số `reason` còn thiếu
+        StreakBreak breakRecord = breakStreakAndLog(programId, brokenAt, smokeEventId, null, note);
         Program program = programRepository.findById(programId).orElseThrow(() -> new NotFoundException("Program not found"));
         return new StreakView(breakRecord.getStreakId(), breakRecord.getPrevStreakDays(), program.getStreakBest(), daysWithoutSmoke(program), null, breakRecord.getBrokenAt());
     }
 
+
     @Override
     @Transactional
-    public StreakBreak breakStreakAndLog(UUID programId, OffsetDateTime brokenAt, UUID smokeEventId, String note) {
+    public StreakBreak breakStreakAndLog(UUID programId, OffsetDateTime brokenAt, UUID smokeEventId, String reason, String note) {
         ensureProgramAccess(programId, false);
         Program program = programRepository.findById(programId)
                 .orElseThrow(() -> new NotFoundException("Program not found: " + programId));
-        
-        // Find the active historical streak to close it
+
         Streak streakToBreak = streakRepo.findFirstByProgramIdAndEndedAtIsNullOrderByStartedAtDesc(programId)
                 .orElseThrow(() -> new NotFoundException("No active streak to break for program " + programId));
-        
+
         OffsetDateTime end = brokenAt != null ? brokenAt : OffsetDateTime.now(ZoneOffset.UTC);
-        int length = Math.max(1, daysBetween(streakToBreak.getStartedAt(), end)); // Đảm bảo độ dài tối thiểu là 1
+        int length = Math.max(1, daysBetween(streakToBreak.getStartedAt(), end));
         streakToBreak.setEndedAt(end);
         streakToBreak.setLengthDays(length);
         streakRepo.save(streakToBreak);
 
-        // Create the break log
         StreakBreak b = new StreakBreak();
         b.setId(UUID.randomUUID());
         b.setStreakId(streakToBreak.getId());
@@ -117,10 +117,10 @@ public class StreakServiceImpl implements StreakService {
         b.setSmokeEventId(smokeEventId);
         b.setBrokenAt(end);
         b.setPrevStreakDays(length);
+        b.setReason(reason); // <-- LƯU LẠI REASON
         b.setNote(note);
         breakRepo.save(b);
 
-        // Update the cache in the Program entity
         program.setStreakCurrent(0);
         if (length > program.getStreakBest()) {
             program.setStreakBest(length);
@@ -214,7 +214,7 @@ public class StreakServiceImpl implements StreakService {
                 .toList();
     }
 
-    private void ensureProgramAccess(UUID programId, boolean allowCoachReadOnly) {
+    private void ensureProgramAccess(UUID programId, boolean allowCoachWrite) {
         if (SecurityUtil.hasRole("ADMIN")) {
             return;
         }
@@ -222,7 +222,6 @@ public class StreakServiceImpl implements StreakService {
         Program program = programRepository.findById(programId)
                 .orElseThrow(() -> new NotFoundException("Program not found: " + programId));
 
-        // Chặn khi hết trial
         if (program.getTrialEndExpected() != null && java.time.Instant.now().isAfter(program.getTrialEndExpected())) {
             throw new com.smokefree.program.web.error.SubscriptionRequiredException("Trial expired");
         }
@@ -232,8 +231,8 @@ public class StreakServiceImpl implements StreakService {
         if (!isOwner && !isCoach) {
             throw new ForbiddenException("Access denied for program " + programId);
         }
-        if (isCoach && !allowCoachReadOnly) {
-            throw new ForbiddenException("Coach cannot modify streak for program " + programId);
+        if (isCoach && !allowCoachWrite) {
+            throw new ForbiddenException("Coach cannot modify steps for program " + programId);
         }
     }
 

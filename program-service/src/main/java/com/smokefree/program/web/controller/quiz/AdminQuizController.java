@@ -26,6 +26,11 @@ import java.util.stream.Collectors;
 @RequiredArgsConstructor
 public class AdminQuizController {
 
+    @PostMapping("/{id}/draft")
+    public ResponseEntity<?> revertToDraft(@PathVariable UUID id) {
+        adminQuizService.revertToDraft(id);
+        return ResponseEntity.ok(Map.of("message", "Reverted to DRAFT successfully"));
+    }
     private final AdminQuizService adminQuizService;
 
     @PostMapping

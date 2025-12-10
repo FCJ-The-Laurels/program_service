@@ -63,7 +63,7 @@ public class SecurityConfig {
         if (issuer != null || jwkSet != null) {
             // Production: Use JWT from AWS Cognito with custom converter
             http.oauth2ResourceServer(oauth2 -> oauth2.jwt(jwt ->
-                jwt.jwtAuthenticationConverter(jwtAuthenticationConverter)
+                    jwt.jwtAuthenticationConverter(jwtAuthenticationConverter)
             ));
         } else {
             // Dev/Local: Use custom header filter for authentication

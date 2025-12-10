@@ -20,7 +20,7 @@ public interface StreakService {
      * Ngắt một chuỗi và trả về bản ghi chi tiết của lần ngắt đó.
      * Được sử dụng trong luồng phục hồi streak.
      */
-    StreakBreak breakStreakAndLog(UUID programId, OffsetDateTime brokenAt, UUID smokeEventId, String note);
+    StreakBreak breakStreakAndLog(UUID programId, OffsetDateTime brokenAt, UUID smokeEventId, String reason, String note);
 
     /**
      * Phục hồi một chuỗi đã bị ngắt trước đó.

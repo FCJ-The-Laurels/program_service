@@ -176,4 +176,19 @@ public class AdminQuizServiceImpl implements AdminQuizService {
         template.setUpdatedAt(Instant.now());
         tplRepo.save(template);
     }
+    @Override
+    public void revertToDraft(UUID templateId) {
+        QuizTemplate t = tplRepo.findById(templateId)
+                .orElseThrow(() -> new NotFoundException("Template not found"));
+
+        if (t.getStatus() != QuizTemplateStatus.PUBLISHED) {
+            throw new ConflictException("Can only revert a PUBLISHED template to DRAFT.");
+        }
+
+        t.setStatus(QuizTemplateStatus.DRAFT);
+        t.setPublishedAt(null); // Xóa thời gian publish
+        t.setUpdatedAt(Instant.now());
+        tplRepo.save(t);
+    }
+
 }

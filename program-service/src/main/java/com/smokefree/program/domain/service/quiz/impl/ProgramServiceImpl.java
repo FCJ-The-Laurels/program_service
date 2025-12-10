@@ -17,10 +17,11 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Instant;
-import java.util.Collections;
-import java.util.List;
-import java.util.Optional;
-import java.util.UUID;
+import java.time.LocalDate;
+import java.time.OffsetDateTime;
+import java.time.ZoneOffset;
+import java.util.*;
+import java.util.stream.Collectors;
 
 @Service
 @RequiredArgsConstructor
@@ -38,37 +39,25 @@ public class ProgramServiceImpl implements ProgramService {
     @Override
     @Transactional
     public ProgramRes createProgram(UUID ownerUserId, CreateProgramReq req, String tierHeader) {
-        // 1. Validate Baseline
-        if (!baselineResultService.hasBaseline(ownerUserId)) {
-            throw new ValidationException("Onboarding quiz is required before creating a program");
-        }
+        // 1. Get Baseline Result (thay vì chỉ kiểm tra sự tồn tại)
+        // Giả định UserBaselineResult có các getter cho severity và totalScore
+        UserBaselineResult baseline = baselineResultService.latest(ownerUserId)
+                .orElseThrow(() -> new ValidationException("Onboarding quiz is required before creating a program."));
 
         // 2. Check Active Program
         repo.findFirstByUserIdAndStatusAndDeletedAtIsNull(ownerUserId, ProgramStatus.ACTIVE)
                 .ifPresent(p -> { throw new ConflictException("User already has ACTIVE program"); });
 
-        // 3. Find Template
-        PlanTemplate template;
-        if (req.planTemplateId() != null) {
-            // Ưu tiên tìm theo ID chính xác
-            template = planTemplateRepo.findById(req.planTemplateId())
-                    .orElseThrow(() -> new NotFoundException("Plan template not found: " + req.planTemplateId()));
-        } else {
-            // Fallback: Tìm theo days (Logic cũ)
-            int planDays = (req.planDays() == null ? 30 : req.planDays());
-            template = planTemplateRepo.findAll().stream()
-                    .filter(t -> t.getTotalDays() == planDays)
-                    .findFirst()
-                    .orElseThrow(() -> new NotFoundException("No plan template found for " + planDays + " days"));
-        }
-
-        int planDays = template.getTotalDays();
+        // 3. Recommend Template based on Severity from Baseline
+        PlanTemplate recommendedTemplate = findRecommendedTemplate(baseline.getSeverity());
+        int planDays = recommendedTemplate.getTotalDays();
 
         // 4. Create Program (Trial vs Paid)
         Program p;
         // Mặc định Trial = true nếu không gửi lên (khuyến khích dùng thử)
         boolean isTrial = (req.trial() == null || Boolean.TRUE.equals(req.trial()));
 
+        // Sử dụng planDays từ template đã được đề xuất
         if (isTrial) {
             // Hardcode trial 7 ngày hoặc config
             p = programCreationService.createTrialProgram(ownerUserId, planDays, 7, tierHeader);
@@ -76,21 +65,43 @@ public class ProgramServiceImpl implements ProgramService {
             p = programCreationService.createPaidProgram(ownerUserId, planDays, tierHeader);
         }
 
-        // 5. Link Template Info
-        p.setPlanTemplateId(template.getId());
-        p.setTemplateCode(template.getCode());
-        p.setTemplateName(template.getName());
+        // 5. Link Template Info & Baseline Results
+        p.setPlanTemplateId(recommendedTemplate.getId());
+        p.setTemplateCode(recommendedTemplate.getCode());
+        p.setTemplateName(recommendedTemplate.getName());
         p.setCoachId(req.coachId());
+        // GÁN KẾT QUẢ TỪ BASELINE VÀO PROGRAM
+        p.setTotalScore(baseline.getTotalScore());
+        p.setSeverity(baseline.getSeverity());
 
         p = repo.save(p);
 
         // 6. Assign Steps & Quizzes
-        stepAssignmentService.createForProgramFromTemplate(p, template);
+        stepAssignmentService.createForProgramFromTemplate(p, recommendedTemplate);
         assignSystemQuizzes(p);
 
         log.info("Created Program {} for user {} (Trial: {})", p.getId(), ownerUserId, isTrial);
 
         return toRes(p, "ACTIVE", null, tierHeader);
+    }
+
+    private PlanTemplate findRecommendedTemplate(SeverityLevel severity) {
+        String templateCode;
+        switch (severity) {
+            case LOW:
+                templateCode = "L1_30D";
+                break;
+            case MODERATE:
+                templateCode = "L2_45D";
+                break;
+            case HIGH:
+                templateCode = "L3_60D";
+                break;
+            default:
+                throw new IllegalStateException("Unsupported severity level for template recommendation: " + severity);
+        }
+        return planTemplateRepo.findByCode(templateCode)
+                .orElseThrow(() -> new NotFoundException("Recommended plan template not found for code: " + templateCode));
     }
 
     private void assignSystemQuizzes(Program program) {
@@ -102,12 +113,27 @@ public class ProgramServiceImpl implements ProgramService {
 
         List<PlanQuizSchedule> schedules = planQuizScheduleRepo.findByPlanTemplateIdOrderByStartOffsetDayAscOrderNoAsc(planTemplateId);
 
+        // Tối ưu hóa: Lấy tất cả các assignment đã tồn tại của program này một lần
+        Set<UUID> existingTemplateIds = quizAssignmentRepo.findByProgramId(program.getId())
+                .stream()
+                .map(QuizAssignment::getTemplateId)
+                .collect(Collectors.toSet());
+
+        List<QuizAssignment> newAssignments = new java.util.ArrayList<>();
+
         for (PlanQuizSchedule schedule : schedules) {
-            if (!quizAssignmentRepo.existsByTemplateIdAndProgramId(schedule.getQuizTemplateId(), program.getId())) {
+            // Kiểm tra trong bộ nhớ thay vì query lại DB
+            if (!existingTemplateIds.contains(schedule.getQuizTemplateId())) {
                 QuizAssignment assignment = new QuizAssignment();
                 assignment.setId(UUID.randomUUID());
                 assignment.setProgramId(program.getId());
                 assignment.setTemplateId(schedule.getQuizTemplateId());
+
+                // === BỔ SUNG CÁC TRƯỜNG CÒN THIẾU ===
+                assignment.setAssignedByUserId(program.getUserId());
+                assignment.setCreatedBy(program.getUserId());
+                // ===================================
+
                 assignment.setStartOffsetDay(schedule.getStartOffsetDay());
                 assignment.setOrderNo(schedule.getOrderNo());
 
@@ -116,12 +142,31 @@ public class ProgramServiceImpl implements ProgramService {
 
                 assignment.setScope(isRecurring ? AssignmentScope.WEEK : AssignmentScope.ONCE);
                 assignment.setEveryDays(isRecurring ? everyDays : 0);
+                assignment.setPeriodDays(everyDays); // Gán giá trị cho periodDays
                 assignment.setOrigin(isRecurring ? QuizAssignmentOrigin.AUTO_WEEKLY : QuizAssignmentOrigin.SYSTEM_ONBOARDING);
                 assignment.setActive(true);
                 assignment.setCreatedAt(Instant.now());
 
-                quizAssignmentRepo.save(assignment);
+                // === BỔ SUNG LOGIC TÍNH NGÀY HẾT HẠN (EXPIRES_AT) ===
+                LocalDate programStartDate = program.getStartDate();
+                if (programStartDate != null && !isRecurring) { // Chỉ áp dụng cho quiz làm 1 lần
+                    final int validForDays = 7; // Mặc định hiệu lực 7 ngày
+                    LocalDate availableDate = programStartDate.plusDays(schedule.getStartOffsetDay() - 1);
+                    Instant expirationInstant = availableDate.plusDays(validForDays).atStartOfDay(ZoneOffset.UTC).toInstant();
+
+                    // Chuyển đổi sang OffsetDateTime để khớp với kiểu dữ liệu của entity
+                    OffsetDateTime expiration = expirationInstant.atOffset(ZoneOffset.UTC);
+                    assignment.setExpiresAt(expiration);
+                }
+                // =================================================
+
+                newAssignments.add(assignment);
             }
+        }
+
+        if (!newAssignments.isEmpty()) {
+            quizAssignmentRepo.saveAll(newAssignments);
+            log.info("Created {} new quiz assignments for program {}", newAssignments.size(), program.getId());
         }
     }
 

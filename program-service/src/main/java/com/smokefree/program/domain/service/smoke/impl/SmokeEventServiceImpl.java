@@ -47,22 +47,22 @@ public class SmokeEventServiceImpl implements SmokeEventService {
         log.info("[SmokeEvent] create for programId: {}, kind: {}", programId, req.kind());
 
         Program program = programRepository.findById(programId)
-            .orElseThrow(() -> new NotFoundException("Program not found: " + programId));
-        log.debug("[SmokeEvent] Program loaded: id={}, currentStreak={}, bestStreak={}, recoveryUsedCount={}", 
-                  program.getId(), program.getStreakCurrent(), program.getStreakBest(), program.getStreakRecoveryUsedCount());
+                .orElseThrow(() -> new NotFoundException("Program not found: " + programId));
+        log.debug("[SmokeEvent] Program loaded: id={}, currentStreak={}, bestStreak={}, recoveryUsedCount={}",
+                program.getId(), program.getStreakCurrent(), program.getStreakBest(), program.getStreakRecoveryUsedCount());
 
         OffsetDateTime now = OffsetDateTime.now(ZoneOffset.UTC);
         SmokeEvent event = SmokeEvent.builder()
-            .programId(programId)
-            .userId(program.getUserId())
-            .kind(req.kind())
-            .eventType(req.eventType())
-            .occurredAt(req.occurredAt() != null ? req.occurredAt() : now)
-            .eventAt(req.eventAt() != null ? req.eventAt() : now)
-            .note(req.note())
-            .puffs(req.puffs())
-            .reason(req.reason())
-            .build();
+                .programId(programId)
+                .userId(program.getUserId())
+                .kind(req.kind())
+                .eventType(req.eventType())
+                .occurredAt(req.occurredAt() != null ? req.occurredAt() : now)
+                .eventAt(req.eventAt() != null ? req.eventAt() : now)
+                .note(req.note())
+                .puffs(req.puffs())
+                .reason(req.reason())
+                .build();
         log.debug("[SmokeEvent] New SmokeEvent built: kind={}", event.getKind());
 
         smokeEventRepository.save(event);
@@ -74,21 +74,20 @@ public class SmokeEventServiceImpl implements SmokeEventService {
         if (req.kind() == SmokeEventKind.RELAPSE) {
             log.warn("[SmokeEvent] RELAPSE detected for programId: {}. Performing HARD RESET.", programId);
             // 1. Break streak hiện tại (ghi log break)
-            streakService.breakStreakAndLog(programId, now, event.getId(), req.note());
-            
+            streakService.breakStreakAndLog(programId, now, event.getId(), req.reason(), req.note()); // <-- SỬA Ở ĐÂY
+
             // 2. KHÔNG cho khôi phục (bỏ qua handleRecoveryAssignment)
-            
+
             // 3. Reset streak về 0 (bắt đầu streak mới ngay lập tức)
             streakService.start(programId, now);
-            
+
         } else if (req.kind() == SmokeEventKind.SLIP) {
             log.info("[SmokeEvent] SLIP detected. Breaking streak and attempting recovery for programId: {}", programId);
-            var breakRecord = streakService.breakStreakAndLog(programId, now, event.getId(), req.note()); 
+            var breakRecord = streakService.breakStreakAndLog(programId, now, event.getId(), req.reason(), req.note()); // <-- SỬA Ở ĐÂY
             log.debug("[SmokeEvent] Streak break has been logged.");
 
             boolean recoveryAssigned = handleRecoveryAssignment(program, breakRecord.getId());
-            
-            // Nếu không còn cơ hội phục hồi (hết lượt), thực hiện "hard reset"
+
             if (!recoveryAssigned) {
                 log.warn("[SmokeEvent] No recovery was assigned. Performing hard reset by starting a new streak.");
                 streakService.start(programId, now);
@@ -96,7 +95,7 @@ public class SmokeEventServiceImpl implements SmokeEventService {
 
         } else {
             log.info("[SmokeEvent] Continuing/starting streak for programId: {}", programId);
-            streakService.startOrContinueStreak(programId); // Sử dụng phương thức này để đảm bảo có streak
+            streakService.startOrContinueStreak(programId);
             int currentStreak = program.getStreakCurrent() + 1;
             program.setStreakCurrent(currentStreak);
             log.debug("[SmokeEvent] Program.streakCurrent incremented to {}", currentStreak);
@@ -108,15 +107,12 @@ public class SmokeEventServiceImpl implements SmokeEventService {
         }
 
         programRepository.save(program);
-        log.debug("[SmokeEvent] Program saved: id={}, currentStreak={}, bestStreak={}, recoveryUsedCount={}", 
-                  program.getId(), program.getStreakCurrent(), program.getStreakBest(), program.getStreakRecoveryUsedCount());
+        log.debug("[SmokeEvent] Program saved: id={}, currentStreak={}, bestStreak={}, recoveryUsedCount={}",
+                program.getId(), program.getStreakCurrent(), program.getStreakBest(), program.getStreakRecoveryUsedCount());
 
         return event;
     }
 
-    /**
-     * Gán nhiệm vụ phục hồi và trả về true nếu thành công, false nếu hết lượt.
-     */
     private boolean handleRecoveryAssignment(Program program, UUID streakBreakId) {
         int nextAttemptOrder = program.getStreakRecoveryUsedCount() + 1;
         log.info("[Recovery] Attempting to find recovery config for attempt #{}", nextAttemptOrder);
@@ -125,7 +121,7 @@ public class SmokeEventServiceImpl implements SmokeEventService {
 
         if (configOpt.isEmpty()) {
             log.warn("[Recovery] No recovery config found for attempt #{}. No recovery task will be assigned.", nextAttemptOrder);
-            return false; // Hết cơ hội
+            return false;
         }
 
         var config = configOpt.get();
@@ -136,10 +132,7 @@ public class SmokeEventServiceImpl implements SmokeEventService {
         log.info("[Recovery] Assigning recovery quiz with module code: {}", moduleCode);
         quizAssignmentService.assignRecoveryQuiz(program.getId(), moduleCode, streakBreakId);
 
-        // KHÔNG ĐẾM TĂNG Ở ĐÂY. Bộ đếm sẽ chỉ được tăng sau khi quiz được nộp thành công.
-        // program.setStreakRecoveryUsedCount(nextAttemptOrder);
-        // log.info("[Recovery] Incremented streak_recovery_used_count to {}", nextAttemptOrder);
-        return true; // Gán thành công
+        return true;
     }
 
     @Override

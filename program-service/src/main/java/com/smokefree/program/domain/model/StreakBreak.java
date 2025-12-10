@@ -24,6 +24,9 @@ public class StreakBreak {
     @Column(name = "broke_at", nullable = false)
     private OffsetDateTime brokenAt;       // <-- đổi tên property; map tới cột broke_at
 
+    @Column(name = "reason") // <-- THÊM TRƯỜNG MỚI
+    private String reason;
+
     @Column(name = "prev_streak_days", nullable = false)
     private Integer prevStreakDays;
 
