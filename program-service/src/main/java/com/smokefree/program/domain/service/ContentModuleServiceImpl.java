@@ -60,15 +60,33 @@ public class ContentModuleServiceImpl implements ContentModuleService {
     @Override
     @Transactional
     public ContentModuleRes update(UUID id, ContentModuleUpdateReq req) {
-        ContentModule entity = contentModuleRepo.findById(id)
+        // 1. Tìm module gốc để lấy code và lang
+        ContentModule baseModule = contentModuleRepo.findById(id)
                 .orElseThrow(() -> new NotFoundException("ContentModule not found: " + id));
 
-        entity.setType(req.type().trim());
-        entity.setPayload(req.payload());
-        // updatedAt sẽ được set trong @PreUpdate
+        String code = baseModule.getCode();
+        String lang = baseModule.getLang();
 
-        ContentModule saved = contentModuleRepo.save(entity);
-        return toRes(saved);
+        // 2. Tìm phiên bản mới nhất và +1 để tạo version mới
+        int newVersion = contentModuleRepo.findTopByCodeAndLangOrderByVersionDesc(code, lang)
+                .map(latest -> latest.getVersion() + 1)
+                .orElse(2); // Nếu không tìm thấy (chỉ có bản gốc), version mới sẽ là 2
+
+        // 3. Tạo một entity *mới* để tạo ra phiên bản mới
+        ContentModule newVersionModule = ContentModule.builder()
+                .code(code)
+                .lang(lang)
+                .version(newVersion)
+                .type(req.type().trim())
+                .payload(req.payload())
+                // id và updatedAt sẽ được tự động gán bởi @PrePersist
+                .build();
+
+        // 4. Lưu entity mới vào DB
+        ContentModule savedModule = contentModuleRepo.save(newVersionModule);
+
+        // 5. Trả về DTO của entity mới
+        return toRes(savedModule);
     }
 
     @Override

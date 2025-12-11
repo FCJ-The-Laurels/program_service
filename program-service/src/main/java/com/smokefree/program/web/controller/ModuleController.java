@@ -42,11 +42,11 @@ public class ModuleController {
         return ResponseEntity.ok(res);
     }
 
-    @DeleteMapping("/{id}")
-    public ResponseEntity<Void> delete(@PathVariable UUID id) {
-        contentModuleService.delete(id);
-        return ResponseEntity.noContent().build();
-    }
+//    @DeleteMapping("/{id}")
+//    public ResponseEntity<Void> delete(@PathVariable UUID id) {
+//        contentModuleService.delete(id);
+//        return ResponseEntity.noContent().build();
+//    }
 
     @GetMapping("/{id}")
     // hoặc mở rộng thêm
